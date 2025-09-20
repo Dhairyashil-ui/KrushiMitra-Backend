@@ -14,6 +14,7 @@ app.use(express.json());
 let farmersCollection;
 let activitiesCollection;
 let mandipricesCollection;
+let aiinteractionsCollection; // Add this line
 
 // Initialize database collections
 async function initializeCollections() {
@@ -25,12 +26,13 @@ async function initializeCollections() {
     farmersCollection = db.collection('farmers');
     activitiesCollection = db.collection('activities');
     mandipricesCollection = db.collection('mandiprices');
+    aiinteractionsCollection = db.collection('aiinteractions'); // Add this line
     
     const duration = Date.now() - startTime;
     logDBOperation('initializeCollections', { 
       durationMs: duration,
       status: 'success',
-      collections: ['farmers', 'activities', 'mandiprices']
+      collections: ['farmers', 'activities', 'mandiprices', 'aiinteractions'] // Update this line
     });
     
     logger.info('Database collections initialized', { durationMs: duration });
@@ -663,6 +665,26 @@ app.post('/ai/chat', authenticate, async (req, res) => {
       }
     };
     
+    // Save AI interaction to database
+    try {
+      const aiInteraction = {
+        farmerId,
+        query,
+        response: aiResponse,
+        context: context || {},
+        timestamp: new Date()
+      };
+      
+      await aiinteractionsCollection.insertOne(aiInteraction);
+      logger.info('AI interaction saved to database', { farmerId });
+    } catch (dbError) {
+      logger.error('Failed to save AI interaction to database', { 
+        error: dbError.message,
+        farmerId
+      });
+      // Don't fail the whole request if we can't save to DB, just log the error
+    }
+    
     const duration = Date.now() - startTime;
     logDBOperation('aiChat', { 
       farmerId,
@@ -699,6 +721,85 @@ app.post('/ai/chat', authenticate, async (req, res) => {
       error: {
         code: 'SERVER_ERROR',
         message: 'Error processing AI chat request'
+      }
+    });
+  }
+});
+
+// POST /ai/interactions - Save AI interaction (user query and AI response)
+app.post('/ai/interactions', authenticate, async (req, res) => {
+  const startTime = Date.now();
+  try {
+    const { farmerId, query, response, context } = req.body;
+    
+    // Validation
+    if (!farmerId || !query || !response) {
+      const duration = Date.now() - startTime;
+      logger.warn('AI interaction save failed - missing required fields', { 
+        farmerId,
+        missingFields: [
+          !farmerId ? 'farmerId' : null, 
+          !query ? 'query' : null,
+          !response ? 'response' : null
+        ].filter(Boolean),
+        durationMs: duration
+      });
+      
+      return res.status(400).json({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Farmer ID, query, and response are required'
+        }
+      });
+    }
+    
+    // Save AI interaction to database
+    const aiInteraction = {
+      farmerId,
+      query,
+      response,
+      context: context || {},
+      timestamp: new Date()
+    };
+    
+    const result = await aiinteractionsCollection.insertOne(aiInteraction);
+    
+    const duration = Date.now() - startTime;
+    logDBOperation('saveAIInteraction', { 
+      farmerId,
+      interactionId: result.insertedId.toString(),
+      durationMs: duration,
+      status: 'success'
+    });
+    
+    logger.info('AI interaction saved successfully', { 
+      farmerId,
+      interactionId: result.insertedId.toString(),
+      durationMs: duration
+    });
+    
+    res.status(201).json({
+      status: 'success',
+      data: {
+        interactionId: result.insertedId
+      }
+    });
+  } catch (error) {
+    const duration = Date.now() - startTime;
+    logDBError('saveAIInteraction', error, { 
+      farmerId: req.body?.farmerId,
+      durationMs: duration
+    });
+    logger.error('Error saving AI interaction', { 
+      error: error.message,
+      farmerId: req.body?.farmerId,
+      durationMs: duration
+    });
+    
+    res.status(500).json({
+      error: {
+        code: 'SERVER_ERROR',
+        message: 'Error saving AI interaction'
       }
     });
   }

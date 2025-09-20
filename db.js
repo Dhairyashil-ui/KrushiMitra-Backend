@@ -1,7 +1,7 @@
 const { MongoClient } = require('mongodb');
 const { logDBOperation, logDBError } = require('./logger');
 
-require('dotenv').config({ path: './SIH_APP-main/backend/.env' });
+require('dotenv').config();
 
 // Check if environment variables are set
 const requiredEnvVars = [
