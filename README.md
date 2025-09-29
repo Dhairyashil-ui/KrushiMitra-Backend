@@ -23,6 +23,8 @@ This is the backend API for the KrushiMitra agricultural application. It provide
 - Node.js (v14 or higher)
 - MongoDB Atlas account
 - Firebase project for authentication
+- ElevenLabs API key for text-to-speech
+- Ollama with llama3 model for AI chat
 
 ### Installation
 ```bash
@@ -184,6 +186,24 @@ See [TEST_PLAN.md](TEST_PLAN.md) for detailed documentation on the test plan and
 
 The AI system uses natural language-like query templates to interact with the database. These templates are defined in [ai-db-queries.json](ai-db-queries.json) and helper functions are available in [ai-query-helper.js](ai-query-helper.js).
 
+## Farmer-Friendly AI Implementation
+
+The application uses a specially trained LLaMA 3 model that provides farmer-friendly responses in multiple languages:
+
+- Simple language explanations
+- Culturally relevant advice
+- Practical, actionable recommendations
+- Support for small-scale farming practices
+
+The AI prompting system is implemented in [farmer-llm-prompt.js](farmer-llm-prompt.js) which provides:
+
+1. **Persona-based prompting** - The AI adopts a friendly farming expert persona
+2. **Context-aware responses** - Personalized advice based on farmer profile
+3. **Language-specific guidelines** - Culturally appropriate communication
+4. **Practical focus** - Emphasis on low-cost, implementable solutions
+
+For detailed information on training the AI to be farmer-friendly, see [FARMER_FRIENDLY_AI_TRAINING.md](../FARMER_FRIENDLY_AI_TRAINING.md).
+
 ### Available Query Templates:
 1. **Get farmer by phone**: `FIND farmers WHERE phone = {phone}`
 2. **Save activity**: `INSERT into activities { farmerId, activityType, description, date, aiSuggestions }`
@@ -251,6 +271,10 @@ If you're experiencing MongoDB connection issues, refer to our comprehensive tro
    ```bash
    node remove-duplicate-collection.js
    ```
+
+### Ollama and TTS Service Issues
+
+If you're experiencing issues with the Ollama or TTS services, please refer to our [Troubleshooting Guide](../TROUBLESHOOTING.md) for detailed solutions.
 
 ## Error Handling
 

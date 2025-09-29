@@ -1,0 +1,58 @@
+{
+  "training_examples": [
+    {
+      "input": "What should I do if my tomato plants have yellow leaves?",
+      "output": "Yellow leaves on tomato plants can indicate several issues. Here's what you can do:\n\n1. Check watering - Too much or too little water can cause yellowing\n2. Look for nutrient deficiency - Especially nitrogen or magnesium\n3. Examine for pests like aphids or whiteflies\n4. Ensure proper drainage to prevent root problems\n\nTry these natural solutions:\n- Add compost to improve soil nutrients\n- Water consistently, keeping soil moist but not waterlogged\n- Spray neem oil to control pests\n- Remove affected leaves to prevent spreading\n\nIf the problem continues, consult your local agricultural officer."
+    },
+    {
+      "input": "क्या मुझे अपने गेहूं की फसल में उर्वरक का उपयोग करना चाहिए?",
+      "output": "हां, गेहूं की फसल के लिए उर्वरक बहुत लाभदायक हो सकते हैं। यहां कुछ महत्वपूर्ण बिंदु दिए गए हैं:\n\n1. जैविक उर्वरक:\n- गोबर की खाद जोड़ें\n- कंपोस्ट बनाएं\n- हरी खाद का उपयोग करें\n\n2. रासायनिक उर्वरक (यदि आवश्यक):\n- नाइट्रोजन (यूरिया)\n- फॉस्फेट (डीएपी)\n- पोटाश (एमओपी)\n\n3. समय:\n- पहली खुरपी के समय उर्वरक दें\n- दूसरी खुरपी के समय फिर से उर्वरक दें\n\n4. मात्रा:\n- स्थानीय कृषि विभाग की सिफारिशों का पालन करें\n- अधिक उर्वरक नुकसान पहुंचा सकते हैं\n\nअपने क्षेत्र के कृषि अधिकारी से परामर्श करें।"
+    },
+    {
+      "input": "എന്റെ നെല്ലിന് പച്ചക്കറികൾ വരുന്നതിന് എന്തു ചെയ്യണം?",
+      "output": "നെല്ലിൽ പച്ചക്കറികൾ വരുന്നത് പല കാരണങ്ങളാൽ സംഭവിക്കാം. ഇവിടെ ചെയ്യാവുന്ന കാര്യങ്ങൾ:\n\n1. വെള്ളം പരിശോധിക്കുക - കൂടുതൽ അല്ലെങ്കിൽ കുറവ് വെള്ളം പച്ചക്കറികൾക്ക് കാരണമാകാം\n2. മണ്ണിലെ പോഷകാഹാരം പരിശോധിക്കുക - പ്രത്യേകിച്ച് നൈട്രജൻ അല്ലെങ്കിൽ മാഗ്നീഷ്യം\n3. കീടങ്ങൾക്കായി പരിശോധിക്കുക പോലെ അഫിഡ്സ് അല്ലെങ്കിൽ വൈറ്റ്ഫ്ലൈസ്\n4. വേരുകൾക്ക് പ്രശ്നങ്ങൾ തടയാൻ ശരിയായ ജലനികാസം ഉറപ്പാക്കുക\n\nഈ പ്രാകൃതിക പരിഹാരങ്ങൾ ശ്രമിക്കുക:\n- മണ്ണിലെ പോഷകാഹാരം മെച്ചപ്പെടുത്താൻ കംപോസ്റ്റ് ചേർക്കുക\n- മണ്ണം ഈരണ്ടും നനവുള്ളതും ആയി സ്ഥിരമായി വെള്ളം കൊടുക്കുക\n- കീടങ്ങളെ നിയന്ത്രിക്കാൻ നീം എണ്ണ സ്പ്രേ ചെയ്യുക\n- വ്യാപിക്കുന്നത് തടയാൻ ബാധിതമായ ഇലകൾ നീക്കം ചെയ്യുക\n\nപ്രശ്നം തുടരുകയാണെങ്കിൽ, നിങ്ങളുടെ പ്രാദേശിക കാർഷിക ഉദ്യോഗസ്ഥനെ സമ്പർക്കിക്കുക."
+    },
+    {
+      "input": "What are the best natural pesticides for cotton crops?",
+      "output": "Here are effective natural pesticides for cotton crops:\n\n1. Neem-based solutions:\n- Neem oil spray (2-3 ml per liter of water)\n- Neem seed kernel extract\n- Apply every 10-15 days\n\n2. Soap sprays:\n- Mix 10-15 grams of soap in 1 liter of water\n- Spray on affected plants\n- Effective against aphids and mites\n\n3. Garlic spray:\n- Crush 10-15 garlic cloves\n- Soak in 1 liter of water overnight\n- Strain and spray on plants\n\n4. Chili spray:\n- Mix 100 grams of red chilies with 1 liter of water\n- Boil for 30 minutes, cool and strain\n- Add a few drops of soap as sticker\n\n5. Cow urine solution:\n- Dilute cow urine 1:10 with water\n- Effective against many pests\n\n6. Companion planting:\n- Grow marigold around cotton fields\n- Plant neem trees nearby\n\nAlways test on a few plants first and spray in early morning or evening to avoid leaf burn."
+    },
+    {
+      "input": "मौसम के अनुसार फसल कैसे चुनें?",
+      "output": "मौसम के अनुसार फसल चुनने के लिए ये बातें ध्यान में रखें:\n\n1. खरीफ फसल (जून-सितंबर):\n- धान, मक्का, बाजरा\n- तिल, मूंगफली\n- कपास, जूट\n\n2. रबी फसल (अक्टूबर-मार्च):\n- गेहूं, जौ, चना\n- मटर, सरसों\n- गेहूं, जौ, चना\n\n3. जायद फसल (अप्रैल-जून):\n- खरबूजा, तरबूज\n- खीरा, लौकी\n- मिर्च, बैगन\n\n4. महत्वपूर्ण बातें:\n- अपने क्षेत्र की जलवायु का ध्यान रखें\n- मिट्टी की गुणवत्ता का पता लगाएं\n- पानी की उपलब्धता की जांच करें\n- स्थानीय बाजार की मांग देखें\n\nअपने क्षेत्र के कृषि विभाग से परामर्श लें।"
+    },
+    {
+      "input": "നവംബർ മാസത്തിൽ എന്തൊക്കെ വിളകൾ വളർത്താൻ കഴിയും?",
+      "output": "നവംബർ മാസത്തിൽ വളർത്താൻ കഴിയുന്ന വിളകൾ:\n\n1. റബി വിളകൾ (നവംബർ-മാർച്ച്):\n- ഗോതമ്പ്, ചോളം\n- പയർ, കടല\n- മാഷ്, പാവട\n\n2. ജൈവ കൃഷിക്ക് അനുയോജ്യമായ നിർദ്ദേശങ്ങൾ:\n- കംപോസ്റ്റ് ഉപയോഗിക്കുക\n- നീം എണ്ണ സ്പ്രേ ചെയ്യുക\n- സഹോദര കൃഷി പ്രയോഗിക്കുക\n\n3. മുൻകരുതലുകൾ:\n- മണ്ണിന്റെ തയ്യാറെടുപ്പ്\n- നല്ല നീർ നികാസം ഉറപ്പാക്കുക\n- യഥാർത്ഥ വിത്ത് ഉപയോഗിക്കുക\n\n4. പ്രദേശപരമായ പരിഗണനകൾ:\n- നിങ്ങളുടെ പ്രദേശത്തെ മഴാപൊഴി പരിശോധിക്കുക\n- പ്രാദേശിക കൃഷി വകുപ്പിന്റെ നിർദ്ദേശങ്ങൾ പിന്തുടരുക\n- അടുത്ത വർഷത്തെ വിലകൾ പരിഗണിക്കുക\n\nനിങ്ങളുടെ പ്രാദേശിക കൃഷി ഉദ്യോഗസ്ഥനെ സമ്പർക്കിക്കുക."
+    },
+    {
+      "input": "How can I improve soil health naturally?",
+      "output": "Here are natural ways to improve soil health:\n\n1. Organic matter addition:\n- Add compost made from kitchen waste\n- Use farmyard manure (FYM)\n- Grow green manure crops like sunhemp\n\n2. Crop rotation:\n- Alternate between different crop families\n- Legumes help fix nitrogen in soil\n- Deep-rooted crops improve soil structure\n\n3. Cover crops:\n- Plant during off-season\n- Prevents soil erosion\n- Adds organic matter when decomposed\n\n4. Mulching:\n- Use straw, leaves, or grass clippings\n- Retains moisture\n- Suppresses weeds\n- Regulates soil temperature\n\n5. Earthworms:\n- Encourage earthworm population\n- They improve soil aeration\n- Their castings are excellent fertilizer\n\n6. Avoid chemical overuse:\n- Reduce synthetic fertilizers\n- Minimize pesticide use\n- Let soil biology work naturally\n\n7. Soil testing:\n- Test pH and nutrient levels\n- Apply amendments based on results\n- Monitor progress over time\n\nStart with small areas to see results before scaling up."
+    },
+    {
+      "input": "मेरे खेत में पानी की कमी है, क्या करूं?",
+      "output": "खेत में पानी की कमी के लिए ये उपाय करें:\n\n1. जल संरक्षण:\n- ड्रिप सिंचाई प्रणाली स्थापित करें\n- स्प्रिंकलर सिंचाई का उपयोग करें\n- पानी के बचाव पर ध्यान दें\n\n2. मिट्टी का प्रबंधन:\n- मिट्टी में कार्बनिक पदार्थ मिलाएं\n- मल्चिंग करें ताकि नमी बनी रहे\n- मिट्टी की जुताई कम करें\n\n3. फसल चुनाव:\n- कम पानी वाली फसलें उगाएं\n- मौसम के अनुसार बोवें\n- सीजनल फसलों को प्राथमिकता दें\n\n4. पानी का स्रोत:\n- बावड़ी या तालाब बनाएं\n- वर्षा जल संग्रहण करें\n- नदी या नहर से पानी लें\n\n5. सरकारी योजनाएं:\n- प्रधानमंत्री कृषि सिंचाई योजना\n- महात्मा गांधी राष्ट्रीय ग्रामीण रोजगार गारंटी योजना\n\nस्थानीय कृषि विभाग से परामर्श लें।"
+    }
+  ],
+  "regional_variations": {
+    "north_india": {
+      "crops": ["wheat", "rice", "sugarcane", "mustard"],
+      "seasons": ["kharif", "rabi", "zaid"],
+      "common_issues": ["waterlogging", "hail damage", "late frost"]
+    },
+    "south_india": {
+      "crops": ["rice", "coconut", "banana", "arecanut"],
+      "seasons": ["kharif", "rabi", "summer"],
+      "common_issues": ["drought", "cyclone damage", "salinity"]
+    },
+    "west_india": {
+      "crops": ["cotton", "groundnut", "bajra", "tur"],
+      "seasons": ["kharif", "rabi", "zaid"],
+      "common_issues": ["drought", "pest infestation", "soil erosion"]
+    },
+    "east_india": {
+      "crops": ["rice", "jute", "tea", "potato"],
+      "seasons": ["kharif", "rabi", "zaid"],
+      "common_issues": ["flooding", "high humidity", "fungal diseases"]
+    }
+  }
+}

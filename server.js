@@ -2,6 +2,10 @@ const express = require('express');
 const cors = require('cors');
 const { connectToDatabase } = require('./db');
 const { logger, logDBOperation, logDBError } = require('./logger');
+const fs = require('fs');
+const path = require('path');
+const { generateSpeech } = require('./tts');
+const { generateFarmerPrompt } = require('./farmer-llm-prompt');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -105,6 +109,40 @@ async function authenticate(req, res, next) {
     });
   }
 }
+// TTS route - supports GET with query params
+app.get('/tts', async (req, res) => {
+  try {
+    const { text, lang = 'hi' } = req.query; // default to Hindi
+    if (!text) {
+      return res.status(400).json({ 
+        error: { code: 'VALIDATION_ERROR', message: 'text query parameter is required' } 
+      });
+    }
+
+    const tmpPath = path.join(__dirname, `speech-${Date.now()}.mp3`);
+    const saved = await generateSpeech(text, lang, { outputFile: tmpPath });
+
+    if (!fs.existsSync(saved)) {
+      return res.status(500).json({ 
+        error: { code: 'TTS_ERROR', message: 'Speech file not found after generation' } 
+      });
+    }
+
+    res.setHeader('Content-Type', 'audio/mpeg');
+    res.setHeader('Content-Disposition', 'inline; filename="speech.mp3"');
+
+    const stream = fs.createReadStream(saved);
+    stream.pipe(res);
+    stream.on('close', () => {
+      fs.promises.unlink(saved).catch(() => {}); // cleanup temp file
+    });
+  } catch (error) {
+    logger.error('TTS generation failed', { error: error.message });
+    res.status(500).json({ 
+      error: { code: 'TTS_ERROR', message: 'Failed to generate speech' } 
+    });
+  }
+});
 
 // 1. Farmer Profile Management
 
@@ -624,7 +662,7 @@ app.get('/mandiprices', authenticate, async (req, res) => {
 app.post('/ai/chat', authenticate, async (req, res) => {
   const startTime = Date.now();
   try {
-    const { farmerId, query, context } = req.body;
+    const { farmerId, query, context, language = 'en' } = req.body;
     
     // Validation
     if (!farmerId || !query) {
@@ -643,8 +681,32 @@ app.post('/ai/chat', authenticate, async (req, res) => {
       });
     }
     
-    // Mock AI response - in reality, you'd call an AI service
-    const aiResponse = `Based on your query "${query}", I recommend checking the latest mandi prices for your crops and considering weather conditions in your area.`;
+    // Get farmer profile for context
+    let farmerProfile = null;
+    try {
+      farmerProfile = await farmersCollection.findOne({ phone: farmerId });
+    } catch (error) {
+      logger.warn('Could not fetch farmer profile for AI context', { 
+        farmerId, 
+        error: error.message 
+      });
+    }
+    
+    // Generate farmer-friendly prompt for LLaMA 3
+    const farmerPrompt = generateFarmerPrompt(language, query, { farmerProfile, ...context });
+    
+    // In a real implementation, you would call the LLaMA 3 model with the farmerPrompt
+    // For now, we'll simulate a farmer-friendly response
+    let aiResponse = `Based on your query "${query}", I recommend checking the latest mandi prices for your crops and considering weather conditions in your area.`;
+    
+    // For demonstration, we'll customize the response based on language
+    if (language === 'hi') {
+      aiResponse = `आपके प्रश्न "${query}" के आधार पर, मैं अनुशंसा करता हूं कि आप अपनी फसलों के नवीनतम मंडी भाव देखें और अपने क्षेत्र में मौसम की स्थिति पर विचार करें।`;
+    } else if (language === 'ml') {
+      aiResponse = `നിങ്ങളുടെ "${query}" എന്ന ചോദ്യത്തിന്റെ അടിസ്ഥാനത്തിൽ, നിങ്ങളുടെ വിളകൾക്കായുള്ള ഏറ്റവും പുതിയ മണ്ടി വിലകൾ പരിശോധിക്കാനും നിങ്ങളുടെ പ്രദേശത്തെ കാലാവസ്ഥാ സ്ഥിതിഗതികൾ പരിഗണിക്കാനും ഞാൻ ശുപാർശ ചെയ്യുന്നു.`;
+    } else if (language === 'mr') {
+      aiResponse = `तुमच्या "${query}" प्रश्नाच्या आधारावर, मी तुम्हाला तुमच्या पीकांसाठी नवीनतम मंडी भाव तपासण्याची आणि तुमच्या क्षेत्रातील हवामानाच्या परिस्थितीचा विचार करण्याची शिफारस करतो.`;
+    }
     
     // Mock automations
     const automations = [
@@ -730,7 +792,7 @@ app.post('/ai/chat', authenticate, async (req, res) => {
 app.post('/ai/interactions', authenticate, async (req, res) => {
   const startTime = Date.now();
   try {
-    const { farmerId, query, response, context } = req.body;
+    const { farmerId, query, response, context, language } = req.body;
     
     // Validation
     if (!farmerId || !query || !response) {
@@ -759,6 +821,7 @@ app.post('/ai/interactions', authenticate, async (req, res) => {
       query,
       response,
       context: context || {},
+      language: language || 'en',
       timestamp: new Date()
     };
     
@@ -851,8 +914,8 @@ app.use((error, req, res, next) => {
 });
 
 // Start server
-app.listen(PORT, async () => {
-  logger.info(`KrushiMitra API server running on port ${PORT}`);
+app.listen(PORT, '0.0.0.0', async () => {
+  logger.info(`KrushiMitra API server running on port ${PORT} (bound to all interfaces)`);
   
   // Initialize database collections
   try {
