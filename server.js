@@ -519,6 +519,7 @@ app.post('/auth/send-otp', async (req, res) => {
       otp,
       expiresAt: Date.now() + 10 * 60 * 1000, // 10 minutes
       attempts: 0
+      
     };
     
     // Send OTP email
