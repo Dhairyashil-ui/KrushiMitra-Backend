@@ -3,27 +3,37 @@ const { logDBOperation, logDBError } = require('./logger');
 
 require('dotenv').config();
 
-// Check if environment variables are set
-const requiredEnvVars = [
-  'DB_READER_USER', 'DB_READER_PASS',
-  'DB_WRITER_USER', 'DB_WRITER_PASS',
-  'DB_ADMIN_USER', 'DB_ADMIN_PASS',
-  'CLUSTER_HOST'
-];
+// Support both MONGODB_URI (cloud deployment) and individual credentials (local development)
+let readerUri, writerUri, adminUri;
 
-const missingEnvVars = requiredEnvVars.filter(envVar => !process.env[envVar]);
-if (missingEnvVars.length > 0) {
-  console.log(JSON.stringify({
-    status: "ERROR_CONNECT",
-    message: `Missing environment variables: ${missingEnvVars.join(', ')} must be set in .env file`
-  }, null, 2));
-  process.exit(1);
+if (process.env.MONGODB_URI) {
+  // Cloud deployment: use single connection string for all operations
+  console.log('Using MONGODB_URI for database connection');
+  readerUri = process.env.MONGODB_URI;
+  writerUri = process.env.MONGODB_URI;
+  adminUri = process.env.MONGODB_URI;
+} else {
+  // Local development: use individual credentials
+  const requiredEnvVars = [
+    'DB_READER_USER', 'DB_READER_PASS',
+    'DB_WRITER_USER', 'DB_WRITER_PASS',
+    'DB_ADMIN_USER', 'DB_ADMIN_PASS',
+    'CLUSTER_HOST'
+  ];
+
+  const missingEnvVars = requiredEnvVars.filter(envVar => !process.env[envVar]);
+  if (missingEnvVars.length > 0) {
+    console.log(JSON.stringify({
+      status: "ERROR_CONNECT",
+      message: `Missing environment variables: Either set MONGODB_URI or set ${missingEnvVars.join(', ')} in .env file`
+    }, null, 2));
+    process.exit(1);
+  }
+
+  readerUri = `mongodb+srv://${process.env.DB_READER_USER}:${process.env.DB_READER_PASS}@${process.env.CLUSTER_HOST}/KrushiMitraDB?retryWrites=true&w=majority`;
+  writerUri = `mongodb+srv://${process.env.DB_WRITER_USER}:${process.env.DB_WRITER_PASS}@${process.env.CLUSTER_HOST}/KrushiMitraDB?retryWrites=true&w=majority`;
+  adminUri = `mongodb+srv://${process.env.DB_ADMIN_USER}:${process.env.DB_ADMIN_PASS}@${process.env.CLUSTER_HOST}/KrushiMitraDB?retryWrites=true&w=majority`;
 }
-
-// Create connection URIs for different user types
-const readerUri = `mongodb+srv://${process.env.DB_READER_USER}:${process.env.DB_READER_PASS}@${process.env.CLUSTER_HOST}/KrushiMitraDB?retryWrites=true&w=majority`;
-const writerUri = `mongodb+srv://${process.env.DB_WRITER_USER}:${process.env.DB_WRITER_PASS}@${process.env.CLUSTER_HOST}/KrushiMitraDB?retryWrites=true&w=majority`;
-const adminUri = `mongodb+srv://${process.env.DB_ADMIN_USER}:${process.env.DB_ADMIN_PASS}@${process.env.CLUSTER_HOST}/KrushiMitraDB?retryWrites=true&w=majority`;
 
 // Create MongoClients for different user types
 const readerClient = new MongoClient(readerUri);
