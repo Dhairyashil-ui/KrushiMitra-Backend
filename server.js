@@ -14,6 +14,7 @@ const fs = require('fs');
 const path = require('path');
 const { generateSpeech } = require('./tts');
 const { generateFarmerPrompt } = require('./farmer-llm-prompt');
+const nodemailer = require('nodemailer');
 
 // Ensure the working directory is the backend folder even if started from project root
 // This prevents relative path lookups (e.g. accidental attempts to access `./health`) from resolving against the root.
@@ -66,7 +67,8 @@ app.use(express.json());
 let farmersCollection;
 let activitiesCollection;
 let mandipricesCollection;
-let aiinteractionsCollection; // Add this line
+let aiinteractionsCollection;
+let usersCollection; // Add this line
 let weatherDataCollection;
 
 // Initialize database collections
@@ -79,7 +81,8 @@ async function initializeCollections() {
     farmersCollection = db.collection('farmers');
     activitiesCollection = db.collection('activities');
     mandipricesCollection = db.collection('mandiprices');
-    aiinteractionsCollection = db.collection('aiinteractions'); // Add this line
+    aiinteractionsCollection = db.collection('aiinteractions');
+    usersCollection = db.collection('users'); // Add this line
     weatherDataCollection = db.collection('weather_data');
     
     const duration = Date.now() - startTime;
@@ -315,6 +318,398 @@ app.get('/farmers/:phone', authenticate, async (req, res) => {
 });
 
 // 2. Authentication
+
+// Google OAuth Authentication Endpoints
+
+// POST /auth/google - Google OAuth login/signup
+app.post('/auth/google', async (req, res) => {
+  const startTime = Date.now();
+  try {
+    const { idToken, user } = req.body;
+    
+    if (!idToken || !user || !user.email) {
+      return res.status(400).json({
+        error: { code: 'VALIDATION_ERROR', message: 'ID token and user email are required' }
+      });
+    }
+
+    // In production, verify the idToken with Google
+    // For now, we'll trust the client-side verification
+    
+    const { email, name, photo, id: googleId } = user;
+    
+    // Check if user exists
+    let existingUser = await usersCollection.findOne({ email });
+    
+    if (existingUser) {
+      // Update last login
+      await usersCollection.updateOne(
+        { email },
+        { 
+          $set: { 
+            lastLogin: new Date(),
+            name,
+            photo
+          } 
+        }
+      );
+      
+      logger.info('User logged in via Google', { userId: existingUser._id.toString(), email });
+      
+      return res.json({
+        status: 'success',
+        data: {
+          user: {
+            id: existingUser._id.toString(),
+            email: existingUser.email,
+            name: existingUser.name,
+            photo: existingUser.photo,
+            createdAt: existingUser.createdAt
+          },
+          token: 'google-auth-token-' + existingUser._id.toString()
+        }
+      });
+    }
+    
+    // Create new user
+    const newUser = {
+      googleId,
+      email,
+      name,
+      photo,
+      createdAt: new Date(),
+      lastLogin: new Date(),
+      profile: {}
+    };
+    
+    const result = await usersCollection.insertOne(newUser);
+    
+    const duration = Date.now() - startTime;
+    logger.info('New user registered via Google', { 
+      userId: result.insertedId.toString(),
+      email,
+      durationMs: duration
+    });
+    
+    res.status(201).json({
+      status: 'success',
+      data: {
+        user: {
+          id: result.insertedId.toString(),
+          email,
+          name,
+          photo,
+          createdAt: newUser.createdAt
+        },
+        token: 'google-auth-token-' + result.insertedId.toString()
+      }
+    });
+  } catch (error) {
+    const duration = Date.now() - startTime;
+    logger.error('Error in Google auth', { error: error.message, durationMs: duration });
+    res.status(500).json({
+      error: { code: 'SERVER_ERROR', message: 'Error processing Google authentication' }
+    });
+  }
+});
+
+// GET /auth/user/:userId - Get user profile
+app.get('/auth/user/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { ObjectId } = require('mongodb');
+    
+    const user = await usersCollection.findOne({ _id: new ObjectId(userId) });
+    
+    if (!user) {
+      return res.status(404).json({
+        error: { code: 'NOT_FOUND', message: 'User not found' }
+      });
+    }
+    
+    res.json({
+      status: 'success',
+      data: {
+        user: {
+          id: user._id.toString(),
+          email: user.email,
+          name: user.name,
+          photo: user.photo,
+          profile: user.profile || {},
+          createdAt: user.createdAt,
+          lastLogin: user.lastLogin
+        }
+      }
+    });
+  } catch (error) {
+    logger.error('Error fetching user', { error: error.message });
+    res.status(500).json({
+      error: { code: 'SERVER_ERROR', message: 'Error fetching user profile' }
+    });
+  }
+});
+
+// PUT /auth/user/:userId - Update user profile
+app.put('/auth/user/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { profile } = req.body;
+    const { ObjectId } = require('mongodb');
+    
+    await usersCollection.updateOne(
+      { _id: new ObjectId(userId) },
+      { $set: { profile, updatedAt: new Date() } }
+    );
+    
+    res.json({ status: 'success', message: 'Profile updated' });
+  } catch (error) {
+    logger.error('Error updating user profile', { error: error.message });
+    res.status(500).json({
+      error: { code: 'SERVER_ERROR', message: 'Error updating profile' }
+    });
+  }
+});
+
+// Gmail OTP Authentication Endpoints
+
+// In-memory OTP storage (in production, use Redis or database)
+const otpStore = new Map();
+
+// Configure nodemailer transporter
+const emailTransporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS
+  }
+});
+
+// Verify transporter configuration on startup
+emailTransporter.verify(function(error, success) {
+  if (error) {
+    logger.error('Email transporter verification failed:', error);
+  } else {
+    logger.info('Email server is ready to send messages');
+  }
+});
+
+// POST /auth/send-otp - Send OTP to email
+app.post('/auth/send-otp', async (req, res) => {
+  try {
+    const { email } = req.body;
+    
+    if (!email || !email.includes('@')) {
+      return res.status(400).json({
+        error: { code: 'VALIDATION_ERROR', message: 'Valid email is required' }
+      });
+    }
+    
+    // Check if email credentials are configured
+    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+      logger.error('Email credentials not configured');
+      return res.status(500).json({
+        error: { code: 'CONFIG_ERROR', message: 'Email service not configured. Please contact administrator.' }
+      });
+    }
+    
+    // Generate 6-digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+    const otpRecord = {
+      otp,
+      expiresAt: Date.now() + 10 * 60 * 1000, // 10 minutes
+      attempts: 0
+    };
+    
+    // Send OTP email
+    const mailOptions = {
+      from: process.env.EMAIL_USER,
+      to: email,
+      subject: 'KrushiMitra - Your OTP Code',
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f5f5f5;">
+          <div style="background-color: #4CAF50; padding: 20px; text-align: center; border-radius: 10px 10px 0 0;">
+            <h1 style="color: white; margin: 0;">KrushiMitra</h1>
+            <p style="color: #E8F5E9; margin: 5px 0;">AI-Powered Farming Assistant</p>
+          </div>
+          <div style="background-color: white; padding: 30px; border-radius: 0 0 10px 10px;">
+            <h2 style="color: #2E7D32; margin-top: 0;">Your OTP Code</h2>
+            <p style="color: #666; font-size: 16px;">Hello,</p>
+            <p style="color: #666; font-size: 16px;">Your One-Time Password (OTP) for KrushiMitra login/signup is:</p>
+            <div style="background-color: #F1F8E9; padding: 20px; margin: 20px 0; text-align: center; border-radius: 8px; border-left: 4px solid #4CAF50;">
+              <h1 style="color: #2E7D32; margin: 0; font-size: 36px; letter-spacing: 8px;">${otp}</h1>
+            </div>
+            <p style="color: #666; font-size: 14px;">This OTP is valid for 10 minutes only.</p>
+            <p style="color: #666; font-size: 14px;">If you didn't request this OTP, please ignore this email.</p>
+            <hr style="border: none; border-top: 1px solid #E0E0E0; margin: 20px 0;">
+            <p style="color: #999; font-size: 12px; text-align: center;">© 2025 KrushiMitra. All rights reserved.</p>
+          </div>
+        </div>
+      `
+    };
+    
+    await emailTransporter.sendMail(mailOptions);
+
+    // Persist OTP only after a successful send so users never wait for undelivered codes
+    otpStore.set(email, otpRecord);
+    
+    logger.info('OTP sent successfully', { email });
+    
+    res.json({
+      status: 'success',
+      message: 'OTP sent to your email'
+    });
+    
+  } catch (error) {
+    logger.error('Error sending OTP', { 
+      error: error.message, 
+      stack: error.stack,
+      code: error.code,
+      response: error.response?.body || error.response,
+      command: error.command
+    });
+
+    const providerDetails = {};
+    if (error.code) providerDetails.providerCode = error.code;
+    if (error.response?.status) providerDetails.providerStatus = error.response.status;
+    if (error.response?.code) providerDetails.providerResponseCode = error.response.code;
+    if (error.command) providerDetails.providerCommand = error.command;
+    if (error.response?.body) {
+      providerDetails.providerMessage =
+        typeof error.response.body === 'string'
+          ? error.response.body
+          : JSON.stringify(error.response.body);
+    } else if (error.response?.response) {
+      providerDetails.providerMessage = error.response.response;
+    }
+
+    res.status(500).json({
+      error: { 
+        code: 'SERVER_ERROR', 
+        message: 'Error sending OTP. Please try again.',
+        ...providerDetails,
+        details: process.env.NODE_ENV === 'development' ? error.message : undefined
+      }
+    });
+  }
+});
+
+// POST /auth/verify-otp - Verify OTP and login/signup
+app.post('/auth/verify-otp', async (req, res) => {
+  try {
+    const { email, otp, name, landSize, soilType } = req.body;
+    
+    if (!email || !otp) {
+      return res.status(400).json({
+        error: { code: 'VALIDATION_ERROR', message: 'Email and OTP are required' }
+      });
+    }
+    
+    // Check if OTP exists
+    const storedOtpData = otpStore.get(email);
+    
+    if (!storedOtpData) {
+      return res.status(400).json({
+        error: { code: 'OTP_NOT_FOUND', message: 'OTP not found. Please request a new one.' }
+      });
+    }
+    
+    // Check if OTP expired
+    if (Date.now() > storedOtpData.expiresAt) {
+      otpStore.delete(email);
+      return res.status(400).json({
+        error: { code: 'OTP_EXPIRED', message: 'OTP has expired. Please request a new one.' }
+      });
+    }
+    
+    // Check attempts
+    if (storedOtpData.attempts >= 3) {
+      otpStore.delete(email);
+      return res.status(400).json({
+        error: { code: 'TOO_MANY_ATTEMPTS', message: 'Too many failed attempts. Please request a new OTP.' }
+      });
+    }
+    
+    // Verify OTP
+    if (storedOtpData.otp !== otp) {
+      storedOtpData.attempts++;
+      return res.status(400).json({
+        error: { code: 'INVALID_OTP', message: `Invalid OTP. ${3 - storedOtpData.attempts} attempts remaining.` }
+      });
+    }
+    
+    // OTP verified - clear it
+    otpStore.delete(email);
+    
+    // Check if user exists
+    let existingUser = await usersCollection.findOne({ email });
+    
+    if (existingUser) {
+      // User exists - login
+      await usersCollection.updateOne(
+        { email },
+        { $set: { lastLogin: new Date() } }
+      );
+      
+      logger.info('User logged in via email OTP', { userId: existingUser._id.toString(), email });
+      
+      return res.json({
+        status: 'success',
+        message: 'Login successful',
+        user: {
+          id: existingUser._id.toString(),
+          email: existingUser.email,
+          name: existingUser.name,
+          photo: existingUser.photo || null,
+          profile: existingUser.profile || {},
+          createdAt: existingUser.createdAt
+        }
+      });
+    } else {
+      // New user - signup
+      if (!name) {
+        return res.status(400).json({
+          error: { code: 'VALIDATION_ERROR', message: 'Name is required for signup' }
+        });
+      }
+      
+      const newUser = {
+        email,
+        name,
+        photo: null,
+        profile: {
+          landSize: landSize || '',
+          soilType: soilType || ''
+        },
+        createdAt: new Date(),
+        lastLogin: new Date()
+      };
+      
+      const result = await usersCollection.insertOne(newUser);
+      
+      logger.info('New user registered via email OTP', { userId: result.insertedId.toString(), email });
+      
+      return res.json({
+        status: 'success',
+        message: 'Registration successful',
+        user: {
+          id: result.insertedId.toString(),
+          email: newUser.email,
+          name: newUser.name,
+          photo: null,
+          profile: newUser.profile,
+          createdAt: newUser.createdAt
+        }
+      });
+    }
+    
+  } catch (error) {
+    logger.error('Error verifying OTP', { error: error.message });
+    res.status(500).json({
+      error: { code: 'SERVER_ERROR', message: 'Error verifying OTP' }
+    });
+  }
+});
 
 // POST /auth/verify - Accept Firebase idToken, verify, return farmer record or create
 app.post('/auth/verify', async (req, res) => {
@@ -807,15 +1202,18 @@ app.post('/ai/chat', authenticate, async (req, res) => {
 app.post('/ai/interactions', authenticate, async (req, res) => {
   const startTime = Date.now();
   try {
-    const { farmerId, query, response, context, language } = req.body;
+    const { farmerId, userId, query, response, context, language } = req.body;
+    
+    // Accept either farmerId (legacy) or userId (new)
+    const userIdentifier = userId || farmerId;
     
     // Validation
-    if (!farmerId || !query || !response) {
+    if (!userIdentifier || !query || !response) {
       const duration = Date.now() - startTime;
       logger.warn('AI interaction save failed - missing required fields', { 
-        farmerId,
+        userIdentifier,
         missingFields: [
-          !farmerId ? 'farmerId' : null, 
+          !userIdentifier ? 'userId/farmerId' : null, 
           !query ? 'query' : null,
           !response ? 'response' : null
         ].filter(Boolean),
@@ -825,14 +1223,15 @@ app.post('/ai/interactions', authenticate, async (req, res) => {
       return res.status(400).json({
         error: {
           code: 'VALIDATION_ERROR',
-          message: 'Farmer ID, query, and response are required'
+          message: 'User ID, query, and response are required'
         }
       });
     }
     
     // Save AI interaction to database
     const aiInteraction = {
-      farmerId,
+      userId: userIdentifier,  // Store as userId for consistency
+      farmerId: farmerId || userIdentifier,  // Keep farmerId for backward compatibility
       query,
       response,
       context: context || {},
@@ -844,14 +1243,14 @@ app.post('/ai/interactions', authenticate, async (req, res) => {
     
     const duration = Date.now() - startTime;
     logDBOperation('saveAIInteraction', { 
-      farmerId,
+      userId: userIdentifier,
       interactionId: result.insertedId.toString(),
       durationMs: duration,
       status: 'success'
     });
     
     logger.info('AI interaction saved successfully', { 
-      farmerId,
+      userId: userIdentifier,
       interactionId: result.insertedId.toString(),
       durationMs: duration
     });
@@ -865,12 +1264,12 @@ app.post('/ai/interactions', authenticate, async (req, res) => {
   } catch (error) {
     const duration = Date.now() - startTime;
     logDBError('saveAIInteraction', error, { 
-      farmerId: req.body?.farmerId,
+      userId: req.body?.userId || req.body?.farmerId,
       durationMs: duration
     });
     logger.error('Error saving AI interaction', { 
       error: error.message,
-      farmerId: req.body?.farmerId,
+      userId: req.body?.userId || req.body?.farmerId,
       durationMs: duration
     });
     
@@ -1247,6 +1646,25 @@ app.post('/weather/location', authenticate, async (req, res) => {
       }
     });
   }
+});
+
+// Root endpoint - API info
+app.get('/', (req, res) => {
+  res.json({
+    status: 'ok',
+    message: 'KrushiMitra Backend API',
+    version: '1.0.0',
+    endpoints: {
+      health: '/health',
+      tts: '/tts?lang=hi&text=नमस्ते',
+      weather: '/weather?lat=18.5204&lon=73.8567',
+      auth: '/auth/verify',
+      farmers: '/farmers (POST, GET)',
+      activities: '/activities (POST, GET)',
+      mandiprices: '/mandiprices (GET, POST)',
+      ai: '/ai/chat (POST), /ai/interactions (POST)'
+    }
+  });
 });
 
 // Health check endpoint
