@@ -139,8 +139,12 @@ app.get('/tts', async (req, res) => {
       });
     }
 
+    // Set headers for proper audio playback including ngrok compatibility
     res.setHeader('Content-Type', 'audio/mpeg');
     res.setHeader('Content-Disposition', 'inline; filename="speech.mp3"');
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Access-Control-Allow-Origin', '*');
 
     const stream = fs.createReadStream(saved);
     stream.pipe(res);
