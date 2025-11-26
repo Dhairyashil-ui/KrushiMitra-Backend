@@ -18,80 +18,154 @@ const NIRAJ_VOICE_ID = "9BWtsMINqrJLrRacOk9x"; // Niraj - Hindi Narrator
 
 // Always use Niraj voice for all languages
 const getDefaultVoiceId = (lang) => {
-  return NIRAJ_VOICE_ID; // Always return Niraj voice only
+	return NIRAJ_VOICE_ID; // Always return Niraj voice only
+};
+
+const GOOGLE_TTS_BASE_URLS = [
+	"https://translate.googleapis.com/translate_tts",
+	"https://translate.google.com/translate_tts",
+];
+
+const LANGUAGE_ALIASES = {
+	hi: "hi",
+	"hi-in": "hi",
+	mr: "mr",
+	"mr-in": "mr",
+	ml: "ml",
+	"ml-in": "ml",
+	en: "en",
+	"en-in": "en",
+	"en-us": "en",
+	bn: "bn",
+	ta: "ta",
+	te: "te",
+	kn: "kn",
+	gu: "gu",
+	or: "or",
+	as: "as",
+};
+
+const normalizeLanguage = (lang = "hi") => {
+	if (!lang || typeof lang !== "string") return "hi";
+	const trimmed = lang.trim().toLowerCase();
+	if (LANGUAGE_ALIASES[trimmed]) return LANGUAGE_ALIASES[trimmed];
+	if (trimmed.includes("-")) {
+		const short = trimmed.split("-")[0];
+		if (LANGUAGE_ALIASES[short]) return LANGUAGE_ALIASES[short];
+		if (short.length === 2) return short;
+	}
+	return trimmed.slice(0, 2) || "hi";
 };
 
 /**
- * Generate speech using ElevenLabs streaming API with only Niraj Hindi voice.
+ * Generate speech using Google Translate TTS (free, no API key required).
+ * Google endpoint rejects long inputs (> ~200 chars). We chunk text to avoid 400 errors.
+ * If Google still fails, we throw a descriptive error (no silent fallback to paid services).
  *
- * @param {string} text - The text to synthesize.
- * @param {"hi"|"mr"|"ml"|"en"} lang - Target language code (ignored, always uses Hindi Niraj voice).
- * @param {{ outputFile?: string, voiceId?: string, modelId?: string }} [options]
- * @returns {Promise<string>} Absolute path to the saved MP3 file.
+ * @param {string} text
+ * @param {"hi"|"mr"|"ml"|"en"} lang
+ * @param {{ outputFile?: string }} options
+ * @returns {Promise<string>}
  */
 async function generateSpeech(text, lang = "hi", options = {}) {
 	if (!text || typeof text !== "string") {
 		throw new Error("generateSpeech: 'text' must be a non-empty string");
 	}
 
-	if (!ELEVENLABS_API_KEY) {
-		throw new Error("Missing ELEVENLABS_API_KEY. Set env var or update the fallback value.");
-	}
+	// Sanitize & trim
+	text = text.trim().replace(/\s+/g, ' ');
+	const normalizedLang = normalizeLanguage(lang);
 
-	// Always use Niraj voice
-	const voiceId = NIRAJ_VOICE_ID;
-	const modelId = options.modelId || DEFAULT_MODEL_ID;
 	const outputFile = options.outputFile || path.join(__dirname, "speech.mp3");
+	await fs.promises.mkdir(path.dirname(outputFile), { recursive: true });
 
-	console.log(`Using Niraj Hindi voice for TTS`);
-	
-	const url = `${ELEVEN_TTS_BASE_URL}/${voiceId}/stream`;
+	// Max safe length per Google Translate TTS request
+	const MAX_CHARS = 180; // keep well under 200 to reduce rejection risk
 
-	const body = {
-		// Multilingual model infers language from input text
-		text,
-		model_id: modelId,
-		// Lower is faster to start streaming; 0 = lowest latency
-		optimize_streaming_latency: 0,
-		// Choose a common output format
-		output_format: "mp3_44100_128",
-	};
-
-	const response = await fetch(url, {
-		method: "POST",
-		headers: {
-			"xi-api-key": ELEVENLABS_API_KEY,
-			"Content-Type": "application/json",
-			Accept: "audio/mpeg",
-		},
-		body: JSON.stringify(body),
-	});
-
-	if (!response.ok || !response.body) {
-		let errText = "";
-		try {
-			errText = await response.text();
-		} catch (_) {}
-		throw new Error(`Niraj voice TTS failed: ${response.status} ${response.statusText} ${errText}`);
+	function chunkText(input) {
+		if (input.length <= MAX_CHARS) return [input];
+		const parts = [];
+		let current = '';
+		for (const word of input.split(/\s+/)) {
+			// If adding the word exceeds limit, push current and start new
+			if ((current + ' ' + word).trim().length > MAX_CHARS) {
+				if (current) parts.push(current.trim());
+				current = word;
+			} else {
+				current += (current ? ' ' : '') + word;
+			}
+		}
+		if (current) parts.push(current.trim());
+		return parts;
 	}
 
-	console.log(`✅ Success with Niraj Hindi voice`);
-	
-	await fs.promises.mkdir(path.dirname(outputFile), { recursive: true });
-	const fileStream = fs.createWriteStream(outputFile);
+	const segments = chunkText(text);
+	console.log(`Using Google TTS (${normalizedLang}) with ${segments.length} segment(s)`);
 
-	// Convert Web ReadableStream (fetch in Node 18+) to Node.js Readable for pipeline
-	const readable = typeof Readable.fromWeb === "function" && response.body && typeof response.body.getReader === 'function'
-		? Readable.fromWeb(response.body)
-		: response.body.pipe ? response.body : Readable.from(response.body);
+	const buffers = [];
+	for (let i = 0; i < segments.length; i++) {
+		const seg = segments[i];
+		console.log(`🔊 [TTS] Segment ${i+1}/${segments.length} length=${seg.length}`);
+		const buffer = await fetchSegmentWithFallback(seg, normalizedLang, i, segments.length);
+		buffers.push(buffer);
+	}
 
-	await pipeline(readable, fileStream);
+	// Concatenate mp3 buffers – each segment is an MP3. Google returns raw MP3 data without ID3 tags typically, so byte concat works.
+	await fs.promises.writeFile(outputFile, Buffer.concat(buffers));
+	console.log(`✅ TTS synthesis complete (${lang}) -> ${outputFile}`);
 	return outputFile;
 }
 
 module.exports = {
 	generateSpeech,
 };
+
+async function fetchSegmentWithFallback(segment, lang, idx, total) {
+	const params = new URLSearchParams({
+		ie: 'UTF-8',
+		q: segment,
+		tl: lang,
+		client: 'tw-ob',
+		idx: String(idx),
+		total: String(total),
+		textlen: String(segment.length),
+		ttsspeed: '1',
+	});
+
+	let lastError;
+	for (const baseUrl of GOOGLE_TTS_BASE_URLS) {
+		const url = `${baseUrl}?${params.toString()}`;
+		try {
+			const response = await fetch(url, {
+				headers: {
+					'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+				},
+			});
+			if (response.ok) {
+				const arrayBuf = await response.arrayBuffer();
+				return Buffer.from(arrayBuf);
+			}
+			const errText = await safeReadText(response);
+			lastError = `(${baseUrl}) ${response.status} ${response.statusText} ${errText}`;
+			if (response.status >= 500) {
+				continue; // try the other host for transient errors
+			}
+		} catch (err) {
+			lastError = `(${baseUrl}) ${err.message}`;
+			continue;
+		}
+	}
+	throw new Error(`Google TTS failed (segment ${idx + 1}): ${lastError || 'Unknown error'}`);
+}
+
+async function safeReadText(response) {
+	try {
+		const raw = await response.text();
+		return raw.length > 240 ? `${raw.slice(0, 240)}…` : raw;
+	} catch (err) {
+		return err.message || 'failed to read error body';
+	}
+}
 
 // Example usage when running directly: `node tts.js`
 if (require.main === module) {
