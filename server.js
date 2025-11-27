@@ -79,9 +79,47 @@ let usersCollection; // Add this line
 let weatherDataCollection;
 let sessionsCollection;
 let userMemoriesCollection;
+let otpCollection;
 
 const DEFAULT_MEMORY_SLICE = Number(process.env.AI_MEMORY_SLICE || 10);
 const MAX_MEMORY_ENTRIES = Number(process.env.AI_MEMORY_LIMIT || 200);
+const OTP_TTL_MINUTES = Number(process.env.OTP_TTL_MINUTES || 10);
+const OTP_MAX_ATTEMPTS = Number(process.env.OTP_MAX_ATTEMPTS || 3);
+
+async function persistOtpRecord(email, otp) {
+  if (!otpCollection) {
+    throw new Error('OTP collection not initialized');
+  }
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + OTP_TTL_MINUTES * 60 * 1000);
+  const otpHash = hashToken(`${email}:${otp}`);
+  await otpCollection.updateOne(
+    { email },
+    {
+      $set: {
+        otpHash,
+        expiresAt,
+        attempts: 0,
+        createdAt: now,
+        lastAttemptAt: null
+      }
+    },
+    { upsert: true }
+  );
+}
+
+async function fetchOtpRecord(email) {
+  if (!otpCollection) {
+    return null;
+  }
+  return otpCollection.findOne({ email });
+}
+
+async function deleteOtpRecord(email) {
+  if (otpCollection) {
+    await otpCollection.deleteOne({ email });
+  }
+}
 
 // Initialize database collections
 async function initializeCollections() {
@@ -98,15 +136,18 @@ async function initializeCollections() {
     sessionsCollection = db.collection('sessions');
     weatherDataCollection = db.collection('weather_data');
     userMemoriesCollection = db.collection('user_memories');
+    otpCollection = db.collection('otp_codes');
 
     await userMemoriesCollection.createIndex({ userKey: 1 }, { unique: true });
     await aiinteractionsCollection.createIndex({ userId: 1, timestamp: -1 });
+    await otpCollection.createIndex({ email: 1 }, { unique: true });
+    await otpCollection.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 });
     
     const duration = Date.now() - startTime;
     logDBOperation('initializeCollections', { 
       durationMs: duration,
       status: 'success',
-      collections: ['farmers', 'activities', 'mandiprices', 'aiinteractions', 'weather_data', 'sessions', 'user_memories']
+      collections: ['farmers', 'activities', 'mandiprices', 'aiinteractions', 'weather_data', 'sessions', 'user_memories', 'otp_codes']
     });
     
     logger.info('Database collections initialized', { durationMs: duration });
@@ -709,7 +750,6 @@ app.put('/auth/user/:userId', async (req, res) => {
 // Email/OTP System (SendGrid)
 
 // In-memory OTP storage (in production, use Redis or database)
-const otpStore = new Map();
 
 // Configure SendGrid if API key is available
 const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
@@ -829,12 +869,8 @@ app.post('/auth/send-otp', async (req, res) => {
     // Generate 6-digit OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     
-    // Store OTP with 10-minute expiration
-    otpStore.set(email, {
-      otp,
-      expiresAt: Date.now() + 10 * 60 * 1000, // 10 minutes
-      attempts: 0
-    });
+    // Persist OTP with expiration
+    await persistOtpRecord(email, otp);
     
     // Send OTP email via SendGrid
     await sendOtpEmail(email, otp);
@@ -877,40 +913,50 @@ app.post('/auth/verify-otp', async (req, res) => {
     }
     
     // Check if OTP exists
-    const storedOtpData = otpStore.get(email);
-    
-    if (!storedOtpData) {
+    const otpRecord = await fetchOtpRecord(email);
+
+    if (!otpRecord) {
       return res.status(400).json({
         error: { code: 'OTP_NOT_FOUND', message: 'OTP not found. Please request a new one.' }
       });
     }
-    
-    // Check if OTP expired
-    if (Date.now() > storedOtpData.expiresAt) {
-      otpStore.delete(email);
+
+    const nowTs = new Date();
+    if (otpRecord.expiresAt && nowTs > otpRecord.expiresAt) {
+      await deleteOtpRecord(email);
       return res.status(400).json({
         error: { code: 'OTP_EXPIRED', message: 'OTP has expired. Please request a new one.' }
       });
     }
-    
-    // Check attempts
-    if (storedOtpData.attempts >= 3) {
-      otpStore.delete(email);
+
+    const attempts = otpRecord.attempts || 0;
+    if (attempts >= OTP_MAX_ATTEMPTS) {
+      await deleteOtpRecord(email);
       return res.status(400).json({
         error: { code: 'TOO_MANY_ATTEMPTS', message: 'Too many failed attempts. Please request a new OTP.' }
       });
     }
-    
-    // Verify OTP
-    if (storedOtpData.otp !== otp) {
-      storedOtpData.attempts++;
+
+    const providedHash = hashToken(`${email}:${otp}`);
+    if (otpRecord.otpHash !== providedHash) {
+      const nextAttempts = attempts + 1;
+      if (nextAttempts >= OTP_MAX_ATTEMPTS) {
+        await deleteOtpRecord(email);
+        return res.status(400).json({
+          error: { code: 'TOO_MANY_ATTEMPTS', message: 'Too many failed attempts. Please request a new OTP.' }
+        });
+      }
+      await otpCollection.updateOne(
+        { email },
+        { $set: { attempts: nextAttempts, lastAttemptAt: nowTs } }
+      );
       return res.status(400).json({
-        error: { code: 'INVALID_OTP', message: `Invalid OTP. ${3 - storedOtpData.attempts} attempts remaining.` }
+        error: { code: 'INVALID_OTP', message: `Invalid OTP. ${Math.max(OTP_MAX_ATTEMPTS - nextAttempts, 0)} attempts remaining.` }
       });
     }
-    
+
     // OTP verified - clear it
-    otpStore.delete(email);
+    await deleteOtpRecord(email);
     
     // Check if user exists
     let existingUser = await usersCollection.findOne({ email });
