@@ -514,13 +514,13 @@ app.post('/auth/send-otp', async (req, res) => {
     
     // Generate 6-digit OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-
-    const otpRecord = {
+    
+    // Store OTP with 10-minute expiration
+    otpStore.set(email, {
       otp,
       expiresAt: Date.now() + 10 * 60 * 1000, // 10 minutes
       attempts: 0
-      
-    };
+    });
     
     // Send OTP email
     const mailOptions = {
@@ -550,9 +550,6 @@ app.post('/auth/send-otp', async (req, res) => {
     };
     
     await emailTransporter.sendMail(mailOptions);
-
-    // Persist OTP only after a successful send so users never wait for undelivered codes
-    otpStore.set(email, otpRecord);
     
     logger.info('OTP sent successfully', { email });
     
@@ -565,30 +562,12 @@ app.post('/auth/send-otp', async (req, res) => {
     logger.error('Error sending OTP', { 
       error: error.message, 
       stack: error.stack,
-      code: error.code,
-      response: error.response?.body || error.response,
-      command: error.command
+      code: error.code 
     });
-
-    const providerDetails = {};
-    if (error.code) providerDetails.providerCode = error.code;
-    if (error.response?.status) providerDetails.providerStatus = error.response.status;
-    if (error.response?.code) providerDetails.providerResponseCode = error.response.code;
-    if (error.command) providerDetails.providerCommand = error.command;
-    if (error.response?.body) {
-      providerDetails.providerMessage =
-        typeof error.response.body === 'string'
-          ? error.response.body
-          : JSON.stringify(error.response.body);
-    } else if (error.response?.response) {
-      providerDetails.providerMessage = error.response.response;
-    }
-
     res.status(500).json({
       error: { 
         code: 'SERVER_ERROR', 
         message: 'Error sending OTP. Please try again.',
-        ...providerDetails,
         details: process.env.NODE_ENV === 'development' ? error.message : undefined
       }
     });
