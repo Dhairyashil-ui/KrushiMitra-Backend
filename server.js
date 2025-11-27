@@ -14,8 +14,7 @@ const fs = require('fs');
 const path = require('path');
 const { generateSpeech } = require('./tts');
 const { generateFarmerPrompt } = require('./farmer-llm-prompt');
-const nodemailer = require('nodemailer');
-let emailVerifyError = null; // capture last transporter verify error
+const sgMail = require('@sendgrid/mail');
 
 // Ensure the working directory is the backend folder even if started from project root
 // This prevents relative path lookups (e.g. accidental attempts to access `./health`) from resolving against the root.
@@ -471,54 +470,78 @@ app.put('/auth/user/:userId', async (req, res) => {
   }
 });
 
-// Gmail OTP Authentication Endpoints
+// Email/OTP System (SendGrid)
 
 // In-memory OTP storage (in production, use Redis or database)
 const otpStore = new Map();
 
-// Configure nodemailer transporter (only if credentials are available)
-let emailTransporter = null;
+// Configure SendGrid if API key is available
+const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
+const SENDGRID_FROM = process.env.SENDGRID_FROM;
 
-if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
-  logger.info('Email env detected', {
-    emailUserMasked: String(process.env.EMAIL_USER).replace(/(^[^@]{2})[^@]*(@.*)$/,
-      (m, p1, p2) => p1 + '***' + p2)
-  });
-  emailTransporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS
-    }
-  });
-
-  // Verify transporter configuration on startup (non-blocking with timeout)
-  emailTransporter.verify(function(error, success) {
-    if (error) {
-      emailVerifyError = error?.message || String(error);
-      logger.error('Email transporter verification failed:', { error: emailVerifyError });
-      emailTransporter = null; // Disable if verification fails
-    } else {
-      logger.info('Email server is ready to send messages');
-      emailVerifyError = null;
-    }
-  });
+if (SENDGRID_API_KEY) {
+  try {
+    sgMail.setApiKey(SENDGRID_API_KEY);
+    logger.info('SendGrid configured for OTP emails', {
+      fromConfigured: Boolean(SENDGRID_FROM)
+    });
+  } catch (e) {
+    logger.error('Failed to configure SendGrid', { error: e?.message || String(e) });
+  }
 } else {
-  logger.warn('Email credentials not configured - OTP functionality will be disabled');
+  logger.warn('SENDGRID_API_KEY not configured - OTP email sending disabled');
 }
 
-// Diagnostics: Email status endpoint
-app.get('/auth/email-status', (req, res) => {
-  const hasEnv = Boolean(process.env.EMAIL_USER && process.env.EMAIL_PASS);
-  res.json({
-    status: 'success',
-    data: {
-      hasEnv,
-      transporterReady: Boolean(emailTransporter),
-      verifyError: emailVerifyError || null
-    }
-  });
-});
+async function sendOtpEmail(to, otp) {
+  if (!SENDGRID_API_KEY || !SENDGRID_FROM) {
+    const reason = !SENDGRID_API_KEY ? 'SENDGRID_API_KEY missing' : 'SENDGRID_FROM missing';
+    throw new Error(`Email not configured: ${reason}`);
+  }
+
+  const subject = 'KrushiMitra - Your OTP Code';
+  const text = `Your KrushiMitra OTP is ${otp}. It is valid for 10 minutes.`;
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f5f5f5;">
+      <div style="background-color: #4CAF50; padding: 20px; text-align: center; border-radius: 10px 10px 0 0;">
+        <h1 style="color: white; margin: 0;">KrushiMitra</h1>
+        <p style="color: #E8F5E9; margin: 5px 0;">AI-Powered Farming Assistant</p>
+      </div>
+      <div style="background-color: white; padding: 30px; border-radius: 0 0 10px 10px;">
+        <h2 style="color: #2E7D32; margin-top: 0;">Your OTP Code</h2>
+        <p style="color: #666; font-size: 16px;">Your One-Time Password (OTP) for KrushiMitra login/signup is:</p>
+        <div style="background-color: #F1F8E9; padding: 20px; margin: 20px 0; text-align: center; border-radius: 8px; border-left: 4px solid #4CAF50;">
+          <h1 style="color: #2E7D32; margin: 0; font-size: 36px; letter-spacing: 8px;">${otp}</h1>
+        </div>
+        <p style="color: #666; font-size: 14px;">This OTP is valid for 10 minutes.</p>
+        <p style="color: #666; font-size: 14px;">If you didn't request this OTP, please ignore this email.</p>
+        <hr style="border: none; border-top: 1px solid #E0E0E0; margin: 20px 0;">
+        <p style="color: #999; font-size: 12px; text-align: center;">© 2025 KrushiMitra. All rights reserved.</p>
+      </div>
+    </div>
+  `;
+
+  const msg = {
+    to,
+    from: SENDGRID_FROM,
+    subject,
+    text,
+    html
+  };
+
+  try {
+    await sgMail.send(msg);
+    return true;
+  } catch (err) {
+    const sgError = {
+      message: err?.message || String(err),
+      code: err?.code,
+      responseStatus: err?.response?.statusCode,
+      responseBody: err?.response?.body
+    };
+    logger.error('SendGrid send failed', sgError);
+    throw new Error(sgError.message || 'Failed to send OTP email');
+  }
+}
 
 // POST /auth/send-otp - Send OTP to email
 app.post('/auth/send-otp', async (req, res) => {
@@ -531,13 +554,16 @@ app.post('/auth/send-otp', async (req, res) => {
       });
     }
     
-    // Check if email service is configured and ready
-    if (!emailTransporter) {
-      logger.error('Email service not available - credentials missing or verification failed');
+    // Check SendGrid configuration
+    if (!SENDGRID_API_KEY || !SENDGRID_FROM) {
+      logger.error('Email service not configured', {
+        hasApiKey: Boolean(SENDGRID_API_KEY),
+        hasFrom: Boolean(SENDGRID_FROM)
+      });
       return res.status(503).json({
-        error: { 
-          code: 'SERVICE_UNAVAILABLE', 
-          message: 'Email service is currently unavailable. Please contact administrator.' 
+        error: {
+          code: 'SERVICE_UNAVAILABLE',
+          message: 'Email service is not configured. Please contact administrator.'
         }
       });
     }
@@ -552,34 +578,8 @@ app.post('/auth/send-otp', async (req, res) => {
       attempts: 0
     });
     
-    // Send OTP email
-    const mailOptions = {
-      from: process.env.EMAIL_USER,
-      to: email,
-      subject: 'KrushiMitra - Your OTP Code',
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f5f5f5;">
-          <div style="background-color: #4CAF50; padding: 20px; text-align: center; border-radius: 10px 10px 0 0;">
-            <h1 style="color: white; margin: 0;">KrushiMitra</h1>
-            <p style="color: #E8F5E9; margin: 5px 0;">AI-Powered Farming Assistant</p>
-          </div>
-          <div style="background-color: white; padding: 30px; border-radius: 0 0 10px 10px;">
-            <h2 style="color: #2E7D32; margin-top: 0;">Your OTP Code</h2>
-            <p style="color: #666; font-size: 16px;">Hello,</p>
-            <p style="color: #666; font-size: 16px;">Your One-Time Password (OTP) for KrushiMitra login/signup is:</p>
-            <div style="background-color: #F1F8E9; padding: 20px; margin: 20px 0; text-align: center; border-radius: 8px; border-left: 4px solid #4CAF50;">
-              <h1 style="color: #2E7D32; margin: 0; font-size: 36px; letter-spacing: 8px;">${otp}</h1>
-            </div>
-            <p style="color: #666; font-size: 14px;">This OTP is valid for 10 minutes only.</p>
-            <p style="color: #666; font-size: 14px;">If you didn't request this OTP, please ignore this email.</p>
-            <hr style="border: none; border-top: 1px solid #E0E0E0; margin: 20px 0;">
-            <p style="color: #999; font-size: 12px; text-align: center;">© 2025 KrushiMitra. All rights reserved.</p>
-          </div>
-        </div>
-      `
-    };
-    
-    await emailTransporter.sendMail(mailOptions);
+    // Send OTP email via SendGrid
+    await sendOtpEmail(email, otp);
     
     logger.info('OTP sent successfully', { email });
     
@@ -589,10 +589,10 @@ app.post('/auth/send-otp', async (req, res) => {
     });
     
   } catch (error) {
-    logger.error('Error sending OTP', { 
-      error: error.message, 
+    logger.error('Error sending OTP', {
+      error: error.message,
       stack: error.stack,
-      code: error.code 
+      code: error.code
     });
     res.status(500).json({
       error: { 
