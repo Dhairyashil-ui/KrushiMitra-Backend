@@ -2,6 +2,7 @@
 require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
 
 const express = require('express');
+const cookieParser = require('cookie-parser');
 let cors;
 try {
   cors = require('cors');
@@ -12,9 +13,11 @@ const { connectToDatabase } = require('./db');
 const { logger, logDBOperation, logDBError } = require('./logger');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { generateSpeech } = require('./tts');
 const { generateFarmerPrompt } = require('./farmer-llm-prompt');
 const sgMail = require('@sendgrid/mail');
+const { ObjectId } = require('mongodb');
 
 // Ensure the working directory is the backend folder even if started from project root
 // This prevents relative path lookups (e.g. accidental attempts to access `./health`) from resolving against the root.
@@ -28,6 +31,9 @@ try {
 }
 
 const app = express();
+const SESSION_COOKIE_NAME = 'session_token';
+const SESSION_DEFAULT_DAYS = Number(process.env.SESSION_TTL_DAYS || 30);
+const SESSION_SECURE = process.env.NODE_ENV === 'production';
 
 // Global CORS (first middleware): either use cors package or manual implementation
 if (cors) {
@@ -62,6 +68,7 @@ app.options('*', (req, res) => {
 const PORT = process.env.PORT || 3001;
 
 app.use(express.json());
+app.use(cookieParser());
 
 // Database collections
 let farmersCollection;
@@ -70,6 +77,11 @@ let mandipricesCollection;
 let aiinteractionsCollection;
 let usersCollection; // Add this line
 let weatherDataCollection;
+let sessionsCollection;
+let userMemoriesCollection;
+
+const DEFAULT_MEMORY_SLICE = Number(process.env.AI_MEMORY_SLICE || 10);
+const MAX_MEMORY_ENTRIES = Number(process.env.AI_MEMORY_LIMIT || 200);
 
 // Initialize database collections
 async function initializeCollections() {
@@ -83,13 +95,18 @@ async function initializeCollections() {
     mandipricesCollection = db.collection('mandiprices');
     aiinteractionsCollection = db.collection('aiinteractions');
     usersCollection = db.collection('users'); // Add this line
+    sessionsCollection = db.collection('sessions');
     weatherDataCollection = db.collection('weather_data');
+    userMemoriesCollection = db.collection('user_memories');
+
+    await userMemoriesCollection.createIndex({ userKey: 1 }, { unique: true });
+    await aiinteractionsCollection.createIndex({ userId: 1, timestamp: -1 });
     
     const duration = Date.now() - startTime;
     logDBOperation('initializeCollections', { 
       durationMs: duration,
       status: 'success',
-      collections: ['farmers', 'activities', 'mandiprices', 'aiinteractions', 'weather_data']
+      collections: ['farmers', 'activities', 'mandiprices', 'aiinteractions', 'weather_data', 'sessions', 'user_memories']
     });
     
     logger.info('Database collections initialized', { durationMs: duration });
@@ -101,6 +118,215 @@ async function initializeCollections() {
       durationMs: duration
     });
   }
+}
+
+function normalizeUserKey(userId, fallback) {
+  if (userId instanceof ObjectId) {
+    return userId.toString();
+  }
+  if (typeof userId === 'string' && userId.trim().length > 0) {
+    return userId.trim();
+  }
+  if (fallback) {
+    return String(fallback);
+  }
+  return null;
+}
+
+function toObjectId(value) {
+  if (!value) {
+    return null;
+  }
+  if (value instanceof ObjectId) {
+    return value;
+  }
+  if (typeof value === 'string' && ObjectId.isValid(value)) {
+    return new ObjectId(value);
+  }
+  return null;
+}
+
+async function ensureUserMemoryDocument(userKey) {
+  if (!userMemoriesCollection) {
+    throw new Error('User memories collection not initialized');
+  }
+  const normalizedKey = normalizeUserKey(userKey);
+  if (!normalizedKey) {
+    return null;
+  }
+  const now = new Date();
+  await userMemoriesCollection.updateOne(
+    { userKey: normalizedKey },
+    {
+      $setOnInsert: { userKey: normalizedKey, entries: [], createdAt: now },
+      $set: { updatedAt: now }
+    },
+    { upsert: true }
+  );
+  return normalizedKey;
+}
+
+async function getUserMemoryEntries(userKey, limit = DEFAULT_MEMORY_SLICE) {
+  const normalizedKey = await ensureUserMemoryDocument(userKey);
+  if (!normalizedKey) {
+    return [];
+  }
+  const doc = await userMemoriesCollection.findOne(
+    { userKey: normalizedKey },
+    { projection: { entries: { $slice: -Math.abs(limit) } } }
+  );
+  return doc?.entries || [];
+}
+
+async function appendUserMemoryEntries(userKey, newEntries = []) {
+  const normalizedKey = await ensureUserMemoryDocument(userKey);
+  if (!normalizedKey || !Array.isArray(newEntries) || newEntries.length === 0) {
+    return;
+  }
+  await userMemoriesCollection.updateOne(
+    { userKey: normalizedKey },
+    {
+      $push: {
+        entries: {
+          $each: newEntries.map(entry => ({
+            role: entry.role || 'assistant',
+            content: entry.content,
+            metadata: entry.metadata || {},
+            timestamp: entry.timestamp || new Date()
+          })),
+          $slice: -Math.abs(MAX_MEMORY_ENTRIES)
+        }
+      },
+      $set: { updatedAt: new Date() }
+    }
+  );
+}
+
+function hashToken(token) {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+function extractSessionToken(req) {
+  const authHeader = req.headers?.authorization || req.headers?.Authorization;
+  if (authHeader && typeof authHeader === 'string') {
+    const prefix = authHeader.trim().slice(0, 6).toLowerCase();
+    if (prefix === 'bearer') {
+      return authHeader.trim().slice(7);
+    }
+  }
+  if (req.cookies && req.cookies[SESSION_COOKIE_NAME]) {
+    return req.cookies[SESSION_COOKIE_NAME];
+  }
+  return null;
+}
+
+function setSessionCookie(res, token, expiresAt) {
+  res.cookie(SESSION_COOKIE_NAME, token, {
+    httpOnly: true,
+    secure: SESSION_SECURE,
+    sameSite: 'lax',
+    expires: expiresAt,
+    path: '/'
+  });
+}
+
+function clearSessionCookie(res) {
+  res.clearCookie(SESSION_COOKIE_NAME, { path: '/' });
+}
+
+async function createSession(userId, req) {
+  if (!sessionsCollection) {
+    throw new Error('Sessions collection not initialized');
+  }
+
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + SESSION_DEFAULT_DAYS * 24 * 60 * 60 * 1000);
+  const token = crypto.randomBytes(48).toString('hex');
+  const tokenHash = hashToken(token);
+
+  await sessionsCollection.insertOne({
+    userId: typeof userId === 'string' ? new ObjectId(userId) : userId,
+    tokenHash,
+    userAgent: req.get('user-agent') || 'unknown',
+    createdAt: now,
+    lastUsedAt: now,
+    expiresAt,
+    revoked: false
+  });
+
+  return { token, expiresAt };
+}
+
+async function findActiveSession(token) {
+  if (!token || !sessionsCollection) {
+    return null;
+  }
+
+  const tokenHash = hashToken(token);
+  const session = await sessionsCollection.findOne({ tokenHash, revoked: { $ne: true } });
+  if (!session) {
+    return null;
+  }
+
+  if (session.expiresAt && session.expiresAt < new Date()) {
+    await sessionsCollection.updateOne(
+      { _id: session._id },
+      { $set: { revoked: true, revokedAt: new Date() } }
+    );
+    return null;
+  }
+
+  await sessionsCollection.updateOne(
+    { _id: session._id },
+    { $set: { lastUsedAt: new Date() } }
+  );
+
+  return session;
+}
+
+async function revokeSessionByToken(token) {
+  if (!token || !sessionsCollection) {
+    return false;
+  }
+
+  const tokenHash = hashToken(token);
+  const result = await sessionsCollection.updateOne(
+    { tokenHash, revoked: { $ne: true } },
+    { $set: { revoked: true, revokedAt: new Date() } }
+  );
+  return result.modifiedCount > 0;
+}
+
+async function resolveSessionUser(token) {
+  const session = await findActiveSession(token);
+  if (!session) {
+    return null;
+  }
+
+  const user = await usersCollection.findOne({ _id: new ObjectId(session.userId) });
+  if (!user) {
+    return null;
+  }
+
+  return { session, user };
+}
+
+function formatUserResponse(user) {
+  if (!user) {
+    return null;
+  }
+
+  return {
+    id: user._id?.toString(),
+    email: user.email,
+    name: user.name,
+    phone: user.phone || null,
+    photo: user.photo || null,
+    profile: user.profile || {},
+    preferredLanguage: user.preferredLanguage || user.profile?.language || null,
+    createdAt: user.createdAt,
+    lastLogin: user.lastLogin
+  };
 }
 
 // Helper function to verify Firebase token (mock implementation)
@@ -337,36 +563,43 @@ app.post('/auth/google', async (req, res) => {
     // For now, we'll trust the client-side verification
     
     const { email, name, photo, id: googleId } = user;
+    const now = new Date();
     
     // Check if user exists
     let existingUser = await usersCollection.findOne({ email });
     
     if (existingUser) {
-      // Update last login
       await usersCollection.updateOne(
         { email },
         { 
           $set: { 
-            lastLogin: new Date(),
+            lastLogin: now,
             name,
             photo
           } 
         }
       );
+      existingUser = {
+        ...existingUser,
+        name,
+        photo,
+        lastLogin: now
+      };
+
+      const session = await createSession(existingUser._id, req);
+      setSessionCookie(res, session.token, session.expiresAt);
       
       logger.info('User logged in via Google', { userId: existingUser._id.toString(), email });
       
       return res.json({
         status: 'success',
         data: {
-          user: {
-            id: existingUser._id.toString(),
-            email: existingUser.email,
-            name: existingUser.name,
-            photo: existingUser.photo,
-            createdAt: existingUser.createdAt
-          },
-          token: 'google-auth-token-' + existingUser._id.toString()
+          user: formatUserResponse(existingUser),
+          token: session.token,
+          session: {
+            token: session.token,
+            expiresAt: session.expiresAt
+          }
         }
       });
     }
@@ -377,12 +610,16 @@ app.post('/auth/google', async (req, res) => {
       email,
       name,
       photo,
-      createdAt: new Date(),
-      lastLogin: new Date(),
+      createdAt: now,
+      lastLogin: now,
       profile: {}
     };
     
     const result = await usersCollection.insertOne(newUser);
+    newUser._id = result.insertedId;
+
+    const session = await createSession(result.insertedId, req);
+    setSessionCookie(res, session.token, session.expiresAt);
     
     const duration = Date.now() - startTime;
     logger.info('New user registered via Google', { 
@@ -394,14 +631,12 @@ app.post('/auth/google', async (req, res) => {
     res.status(201).json({
       status: 'success',
       data: {
-        user: {
-          id: result.insertedId.toString(),
-          email,
-          name,
-          photo,
-          createdAt: newUser.createdAt
-        },
-        token: 'google-auth-token-' + result.insertedId.toString()
+        user: formatUserResponse(newUser),
+        token: session.token,
+        session: {
+          token: session.token,
+          expiresAt: session.expiresAt
+        }
       }
     });
   } catch (error) {
@@ -434,6 +669,7 @@ app.get('/auth/user/:userId', async (req, res) => {
           id: user._id.toString(),
           email: user.email,
           name: user.name,
+          phone: user.phone || null,
           photo: user.photo,
           profile: user.profile || {},
           createdAt: user.createdAt,
@@ -630,7 +866,9 @@ app.post('/auth/send-otp', async (req, res) => {
 // POST /auth/verify-otp - Verify OTP and login/signup
 app.post('/auth/verify-otp', async (req, res) => {
   try {
-    const { email, otp, name, landSize, soilType } = req.body;
+    const { email, otp, name, landSize, soilType, phone, language } = req.body;
+    const sanitizedPhone = typeof phone === 'string' ? phone.trim() : '';
+    const preferredLanguage = typeof language === 'string' && language.trim().length > 0 ? language.trim() : null;
     
     if (!email || !otp) {
       return res.status(400).json({
@@ -678,55 +916,93 @@ app.post('/auth/verify-otp', async (req, res) => {
     let existingUser = await usersCollection.findOne({ email });
     
     if (existingUser) {
-      // User exists - login
+      const now = new Date();
+      const updateFields = { lastLogin: now };
+      if (sanitizedPhone) {
+        updateFields.phone = sanitizedPhone;
+        updateFields['profile.phone'] = sanitizedPhone;
+      }
+      if (preferredLanguage) {
+        updateFields.preferredLanguage = preferredLanguage;
+        updateFields['profile.language'] = preferredLanguage;
+      }
       await usersCollection.updateOne(
         { email },
-        { $set: { lastLogin: new Date() } }
+        { $set: updateFields }
       );
+      existingUser = {
+        ...existingUser,
+        ...('phone' in updateFields ? { phone: sanitizedPhone } : {}),
+        lastLogin: now,
+        profile: {
+          ...(existingUser.profile || {}),
+          ...(sanitizedPhone ? { phone: sanitizedPhone } : {}),
+          ...(preferredLanguage ? { language: preferredLanguage } : {})
+        },
+        preferredLanguage: preferredLanguage || existingUser.preferredLanguage || existingUser.profile?.language
+      };
+
+      await ensureUserMemoryDocument(existingUser._id?.toString() || email);
+
+      const session = await createSession(existingUser._id, req);
+      setSessionCookie(res, session.token, session.expiresAt);
       
       logger.info('User logged in via email OTP', { userId: existingUser._id.toString(), email });
       
       return res.json({
         status: 'success',
         message: 'Login successful',
-        user: {
-          id: existingUser._id.toString(),
-          email: existingUser.email,
-          name: existingUser.name,
-          photo: existingUser.photo || null,
-          profile: existingUser.profile || {},
-          createdAt: existingUser.createdAt
+        user: formatUserResponse(existingUser),
+        token: session.token,
+        session: {
+          token: session.token,
+          expiresAt: session.expiresAt
         }
       });
     } else {
       // New user - signup (fallback values for optional fields)
       const derivedName = name?.trim() || email.split('@')[0] || 'KrushiMitra Farmer';
+      if (!sanitizedPhone) {
+        return res.status(400).json({
+          error: { code: 'VALIDATION_ERROR', message: 'Phone number is required for new users' }
+        });
+      }
+      const now = new Date();
+      const userLanguage = preferredLanguage || 'hi';
       const newUser = {
         email,
         name: derivedName,
+        phone: sanitizedPhone,
         photo: null,
         profile: {
+          phone: sanitizedPhone,
           landSize: landSize?.toString() || '',
-          soilType: soilType || ''
+          soilType: soilType || '',
+          language: userLanguage
         },
-        createdAt: new Date(),
-        lastLogin: new Date()
+        preferredLanguage: userLanguage,
+        createdAt: now,
+        lastLogin: now
       };
       
       const result = await usersCollection.insertOne(newUser);
+      newUser._id = result.insertedId;
+
+      await ensureUserMemoryDocument(newUser._id.toString());
+
+      const session = await createSession(result.insertedId, req);
+      setSessionCookie(res, session.token, session.expiresAt);
       
       logger.info('New user registered via email OTP', { userId: result.insertedId.toString(), email });
       
       return res.json({
         status: 'success',
         message: 'Registration successful',
-        user: {
-          id: result.insertedId.toString(),
-          email: newUser.email,
-          name: newUser.name,
-          photo: null,
-          profile: newUser.profile,
-          createdAt: newUser.createdAt
+        user: formatUserResponse(newUser),
+        token: session.token,
+        session: {
+          token: session.token,
+          expiresAt: session.expiresAt
         }
       });
     }
@@ -735,6 +1011,63 @@ app.post('/auth/verify-otp', async (req, res) => {
     logger.error('Error verifying OTP', { error: error.message });
     res.status(500).json({
       error: { code: 'SERVER_ERROR', message: 'Error verifying OTP' }
+    });
+  }
+});
+
+// GET /auth/session - Validate existing session token (cookie or header)
+app.get('/auth/session', async (req, res) => {
+  try {
+    const token = extractSessionToken(req);
+    if (!token) {
+      return res.status(401).json({
+        error: { code: 'SESSION_NOT_FOUND', message: 'No session token found' }
+      });
+    }
+
+    const resolved = await resolveSessionUser(token);
+    if (!resolved) {
+      clearSessionCookie(res);
+      return res.status(401).json({
+        error: { code: 'SESSION_INVALID', message: 'Session expired or invalid' }
+      });
+    }
+
+    return res.json({
+      status: 'success',
+      data: {
+        user: formatUserResponse(resolved.user),
+        session: {
+          token,
+          expiresAt: resolved.session.expiresAt
+        }
+      }
+    });
+  } catch (error) {
+    logger.error('Error checking session', { error: error.message });
+    res.status(500).json({
+      error: { code: 'SERVER_ERROR', message: 'Unable to verify session' }
+    });
+  }
+});
+
+// POST /auth/logout - Clear session cookie and revoke token
+app.post('/auth/logout', async (req, res) => {
+  try {
+    const token = extractSessionToken(req);
+    if (token) {
+      await revokeSessionByToken(token);
+    }
+    clearSessionCookie(res);
+
+    res.json({
+      status: 'success',
+      message: 'Logged out successfully'
+    });
+  } catch (error) {
+    logger.error('Error logging out', { error: error.message });
+    res.status(500).json({
+      error: { code: 'SERVER_ERROR', message: 'Unable to logout' }
     });
   }
 });
@@ -1100,49 +1433,81 @@ app.get('/mandiprices', authenticate, async (req, res) => {
 app.post('/ai/chat', authenticate, async (req, res) => {
   const startTime = Date.now();
   try {
-    const { farmerId, query, context, language = 'en' } = req.body;
+    const { farmerId, userId, query, context = {}, language: requestedLanguage } = req.body;
+    const userIdentifier = normalizeUserKey(userId || farmerId || req.userId, farmerId);
     
     // Validation
-    if (!farmerId || !query) {
+    if (!userIdentifier || !query) {
       const duration = Date.now() - startTime;
       logger.warn('AI chat request failed - missing required fields', { 
-        farmerId,
-        missingFields: [!farmerId ? 'farmerId' : null, !query ? 'query' : null].filter(Boolean),
+        userIdentifier,
+        missingFields: [!userIdentifier ? 'userId/farmerId' : null, !query ? 'query' : null].filter(Boolean),
         durationMs: duration
       });
       
       return res.status(400).json({
         error: {
           code: 'VALIDATION_ERROR',
-          message: 'Farmer ID and query are required'
+          message: 'User identifier and query are required'
         }
       });
     }
     
+    let userDoc = null;
+    const maybeUserObject = toObjectId(userIdentifier);
+    if (maybeUserObject) {
+      try {
+        userDoc = await usersCollection.findOne({ _id: maybeUserObject });
+      } catch (error) {
+        logger.warn('Could not fetch user document for AI context', {
+          userId: userIdentifier,
+          error: error.message
+        });
+      }
+    }
+
+    const resolvedLanguage = requestedLanguage && typeof requestedLanguage === 'string' && requestedLanguage.trim().length > 0
+      ? requestedLanguage.trim()
+      : (userDoc?.preferredLanguage || userDoc?.profile?.language || 'en');
+
     // Get farmer profile for context
     let farmerProfile = null;
     try {
-      farmerProfile = await farmersCollection.findOne({ phone: farmerId });
+      if (farmerId) {
+        farmerProfile = await farmersCollection.findOne({ phone: farmerId });
+      }
+      if (!farmerProfile && (userDoc?.phone || userDoc?.profile?.phone)) {
+        const fallbackPhone = userDoc?.phone || userDoc?.profile?.phone;
+        if (fallbackPhone) {
+          farmerProfile = await farmersCollection.findOne({ phone: fallbackPhone });
+        }
+      }
     } catch (error) {
       logger.warn('Could not fetch farmer profile for AI context', { 
-        farmerId, 
+        farmerId: farmerId || userIdentifier, 
         error: error.message 
       });
     }
     
+    const memoryEntries = await getUserMemoryEntries(userIdentifier, DEFAULT_MEMORY_SLICE);
+
     // Generate farmer-friendly prompt for LLaMA 3
-    const farmerPrompt = generateFarmerPrompt(language, query, { farmerProfile, ...context });
+    const farmerPrompt = generateFarmerPrompt(resolvedLanguage, query, { 
+      farmerProfile, 
+      ...context,
+      memory: memoryEntries
+    });
     
     // In a real implementation, you would call the LLaMA 3 model with the farmerPrompt
     // For now, we'll simulate a farmer-friendly response
     let aiResponse = `Based on your query "${query}", I recommend checking the latest mandi prices for your crops and considering weather conditions in your area.`;
     
     // For demonstration, we'll customize the response based on language
-    if (language === 'hi') {
+    if (resolvedLanguage === 'hi') {
       aiResponse = `आपके प्रश्न "${query}" के आधार पर, मैं अनुशंसा करता हूं कि आप अपनी फसलों के नवीनतम मंडी भाव देखें और अपने क्षेत्र में मौसम की स्थिति पर विचार करें।`;
-    } else if (language === 'ml') {
+    } else if (resolvedLanguage === 'ml') {
       aiResponse = `നിങ്ങളുടെ "${query}" എന്ന ചോദ്യത്തിന്റെ അടിസ്ഥാനത്തിൽ, നിങ്ങളുടെ വിളകൾക്കായുള്ള ഏറ്റവും പുതിയ മണ്ടി വിലകൾ പരിശോധിക്കാനും നിങ്ങളുടെ പ്രദേശത്തെ കാലാവസ്ഥാ സ്ഥിതിഗതികൾ പരിഗണിക്കാനും ഞാൻ ശുപാർശ ചെയ്യുന്നു.`;
-    } else if (language === 'mr') {
+    } else if (resolvedLanguage === 'mr') {
       aiResponse = `तुमच्या "${query}" प्रश्नाच्या आधारावर, मी तुम्हाला तुमच्या पीकांसाठी नवीनतम मंडी भाव तपासण्याची आणि तुमच्या क्षेत्रातील हवामानाच्या परिस्थितीचा विचार करण्याची शिफारस करतो.`;
     }
     
@@ -1165,55 +1530,75 @@ app.post('/ai/chat', authenticate, async (req, res) => {
       }
     };
     
+    const memoryToAppend = [
+      { role: 'user', content: query },
+      { role: 'assistant', content: aiResponse }
+    ];
+
     // Save AI interaction to database
     try {
       const aiInteraction = {
-        farmerId,
+        farmerId: farmerId || null,
+        userId: userIdentifier,
         query,
         response: aiResponse,
-        context: context || {},
+        context: { ...context, memory: memoryEntries },
+        language: resolvedLanguage,
         timestamp: new Date()
       };
       
       await aiinteractionsCollection.insertOne(aiInteraction);
-      logger.info('AI interaction saved to database', { farmerId });
+      logger.info('AI interaction saved to database', { userIdentifier });
     } catch (dbError) {
       logger.error('Failed to save AI interaction to database', { 
         error: dbError.message,
-        farmerId
+        userIdentifier
       });
       // Don't fail the whole request if we can't save to DB, just log the error
+    }
+
+    try {
+      await appendUserMemoryEntries(userIdentifier, memoryToAppend);
+    } catch (memoryError) {
+      logger.warn('Failed to append AI memory entries', {
+        error: memoryError.message,
+        userIdentifier
+      });
     }
     
     const duration = Date.now() - startTime;
     logDBOperation('aiChat', { 
-      farmerId,
+      userId: userIdentifier,
       durationMs: duration,
       status: 'success'
     });
     
     logger.info('AI chat response generated', { 
-      farmerId,
+      userId: userIdentifier,
       durationMs: duration
     });
+
+    const latestMemory = [...memoryEntries, ...memoryToAppend].slice(-DEFAULT_MEMORY_SLICE);
     
     res.status(200).json({
       status: 'success',
       data: {
         response: aiResponse,
         automations,
-        relatedData
+        relatedData,
+        memory: latestMemory,
+        language: resolvedLanguage
       }
     });
   } catch (error) {
     const duration = Date.now() - startTime;
     logDBError('aiChat', error, { 
-      farmerId: req.body?.farmerId,
+      userId: req.body?.userId || req.body?.farmerId,
       durationMs: duration
     });
     logger.error('Error processing AI chat request', { 
       error: error.message,
-      farmerId: req.body?.farmerId,
+      userId: req.body?.userId || req.body?.farmerId,
       durationMs: duration
     });
     
@@ -1233,7 +1618,7 @@ app.post('/ai/interactions', authenticate, async (req, res) => {
     const { farmerId, userId, query, response, context, language } = req.body;
     
     // Accept either farmerId (legacy) or userId (new)
-    const userIdentifier = userId || farmerId;
+    const userIdentifier = normalizeUserKey(userId || farmerId || req.userId, farmerId);
     
     // Validation
     if (!userIdentifier || !query || !response) {
@@ -1268,6 +1653,18 @@ app.post('/ai/interactions', authenticate, async (req, res) => {
     };
     
     const result = await aiinteractionsCollection.insertOne(aiInteraction);
+
+    try {
+      await appendUserMemoryEntries(userIdentifier, [
+        { role: 'user', content: query },
+        { role: 'assistant', content: response }
+      ]);
+    } catch (memoryError) {
+      logger.warn('Failed to persist manual AI interaction memory', {
+        error: memoryError.message,
+        userIdentifier
+      });
+    }
     
     const duration = Date.now() - startTime;
     logDBOperation('saveAIInteraction', { 
