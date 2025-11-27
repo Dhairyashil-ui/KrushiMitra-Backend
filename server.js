@@ -699,19 +699,14 @@ app.post('/auth/verify-otp', async (req, res) => {
         }
       });
     } else {
-      // New user - signup
-      if (!name) {
-        return res.status(400).json({
-          error: { code: 'VALIDATION_ERROR', message: 'Name is required for signup' }
-        });
-      }
-      
+      // New user - signup (fallback values for optional fields)
+      const derivedName = name?.trim() || email.split('@')[0] || 'KrushiMitra Farmer';
       const newUser = {
         email,
-        name,
+        name: derivedName,
         photo: null,
         profile: {
-          landSize: landSize || '',
+          landSize: landSize?.toString() || '',
           soilType: soilType || ''
         },
         createdAt: new Date(),
