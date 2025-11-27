@@ -529,7 +529,11 @@ async function sendOtpEmail(to, otp) {
   };
 
   try {
+    console.log('📨 Sending email to:', to);
+    console.log('SG API Key exists:', Boolean(SENDGRID_API_KEY));
+    console.log('From:', SENDGRID_FROM);
     await sgMail.send(msg);
+    console.log('✅ SendGrid accepted request for:', to);
     return true;
   } catch (err) {
     const sgError = {
@@ -538,14 +542,32 @@ async function sendOtpEmail(to, otp) {
       responseStatus: err?.response?.statusCode,
       responseBody: err?.response?.body
     };
+    console.error('❌ SENDGRID EMAIL ERROR:', err?.response?.body || err);
     logger.error('SendGrid send failed', sgError);
     throw new Error(sgError.message || 'Failed to send OTP email');
   }
 }
 
+// GET /auth/email-status - SendGrid diagnostics
+app.get('/auth/email-status', (req, res) => {
+  res.json({
+    status: 'success',
+    data: {
+      provider: 'SendGrid',
+      hasApiKey: Boolean(SENDGRID_API_KEY),
+      hasFrom: Boolean(SENDGRID_FROM),
+      configured: Boolean(SENDGRID_API_KEY && SENDGRID_FROM)
+    }
+  });
+});
+
 // POST /auth/send-otp - Send OTP to email
 app.post('/auth/send-otp', async (req, res) => {
   try {
+    console.log('🔍 /auth/send-otp hit');
+    console.log('Body:', req.body);
+    console.log('SENDGRID_API_KEY:', process.env.SENDGRID_API_KEY ? 'OK' : 'MISSING');
+    console.log('SENDGRID_FROM:', process.env.SENDGRID_FROM);
     const { email } = req.body;
     
     if (!email || !email.includes('@')) {
@@ -589,6 +611,7 @@ app.post('/auth/send-otp', async (req, res) => {
     });
     
   } catch (error) {
+    console.error('🔥 OTP ERROR:', error);
     logger.error('Error sending OTP', {
       error: error.message,
       stack: error.stack,
