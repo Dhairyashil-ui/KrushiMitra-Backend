@@ -475,23 +475,30 @@ app.put('/auth/user/:userId', async (req, res) => {
 // In-memory OTP storage (in production, use Redis or database)
 const otpStore = new Map();
 
-// Configure nodemailer transporter
-const emailTransporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS
-  }
-});
+// Configure nodemailer transporter (only if credentials are available)
+let emailTransporter = null;
 
-// Verify transporter configuration on startup
-emailTransporter.verify(function(error, success) {
-  if (error) {
-    logger.error('Email transporter verification failed:', error);
-  } else {
-    logger.info('Email server is ready to send messages');
-  }
-});
+if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+  emailTransporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_PASS
+    }
+  });
+
+  // Verify transporter configuration on startup (non-blocking with timeout)
+  emailTransporter.verify(function(error, success) {
+    if (error) {
+      logger.error('Email transporter verification failed:', error);
+      emailTransporter = null; // Disable if verification fails
+    } else {
+      logger.info('Email server is ready to send messages');
+    }
+  });
+} else {
+  logger.warn('Email credentials not configured - OTP functionality will be disabled');
+}
 
 // POST /auth/send-otp - Send OTP to email
 app.post('/auth/send-otp', async (req, res) => {
@@ -504,11 +511,14 @@ app.post('/auth/send-otp', async (req, res) => {
       });
     }
     
-    // Check if email credentials are configured
-    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-      logger.error('Email credentials not configured');
-      return res.status(500).json({
-        error: { code: 'CONFIG_ERROR', message: 'Email service not configured. Please contact administrator.' }
+    // Check if email service is configured and ready
+    if (!emailTransporter) {
+      logger.error('Email service not available - credentials missing or verification failed');
+      return res.status(503).json({
+        error: { 
+          code: 'SERVICE_UNAVAILABLE', 
+          message: 'Email service is currently unavailable. Please contact administrator.' 
+        }
       });
     }
     
