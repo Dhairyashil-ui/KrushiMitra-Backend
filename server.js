@@ -15,6 +15,7 @@ const path = require('path');
 const { generateSpeech } = require('./tts');
 const { generateFarmerPrompt } = require('./farmer-llm-prompt');
 const nodemailer = require('nodemailer');
+let emailVerifyError = null; // capture last transporter verify error
 
 // Ensure the working directory is the backend folder even if started from project root
 // This prevents relative path lookups (e.g. accidental attempts to access `./health`) from resolving against the root.
@@ -479,6 +480,10 @@ const otpStore = new Map();
 let emailTransporter = null;
 
 if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+  logger.info('Email env detected', {
+    emailUserMasked: String(process.env.EMAIL_USER).replace(/(^[^@]{2})[^@]*(@.*)$/,
+      (m, p1, p2) => p1 + '***' + p2)
+  });
   emailTransporter = nodemailer.createTransport({
     service: 'gmail',
     auth: {
@@ -490,15 +495,30 @@ if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
   // Verify transporter configuration on startup (non-blocking with timeout)
   emailTransporter.verify(function(error, success) {
     if (error) {
-      logger.error('Email transporter verification failed:', error);
+      emailVerifyError = error?.message || String(error);
+      logger.error('Email transporter verification failed:', { error: emailVerifyError });
       emailTransporter = null; // Disable if verification fails
     } else {
       logger.info('Email server is ready to send messages');
+      emailVerifyError = null;
     }
   });
 } else {
   logger.warn('Email credentials not configured - OTP functionality will be disabled');
 }
+
+// Diagnostics: Email status endpoint
+app.get('/auth/email-status', (req, res) => {
+  const hasEnv = Boolean(process.env.EMAIL_USER && process.env.EMAIL_PASS);
+  res.json({
+    status: 'success',
+    data: {
+      hasEnv,
+      transporterReady: Boolean(emailTransporter),
+      verifyError: emailVerifyError || null
+    }
+  });
+});
 
 // POST /auth/send-otp - Send OTP to email
 app.post('/auth/send-otp', async (req, res) => {
