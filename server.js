@@ -86,15 +86,45 @@ const MAX_MEMORY_ENTRIES = Number(process.env.AI_MEMORY_LIMIT || 200);
 const OTP_TTL_MINUTES = Number(process.env.OTP_TTL_MINUTES || 10);
 const OTP_MAX_ATTEMPTS = Number(process.env.OTP_MAX_ATTEMPTS || 3);
 
+function normalizeEmail(email) {
+  if (typeof email !== 'string') {
+    return '';
+  }
+  return email.trim().toLowerCase();
+}
+
+function escapeRegex(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function buildEmailQuery(email) {
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail) {
+    return null;
+  }
+  const escaped = escapeRegex(normalizedEmail);
+  return {
+    $or: [
+      { email: normalizedEmail },
+      { emailNormalized: normalizedEmail },
+      { email: { $regex: `^${escaped}$`, $options: 'i' } }
+    ]
+  };
+}
+
 async function persistOtpRecord(email, otp) {
   if (!otpCollection) {
     throw new Error('OTP collection not initialized');
   }
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail) {
+    throw new Error('Cannot persist OTP without a valid email');
+  }
   const now = new Date();
   const expiresAt = new Date(now.getTime() + OTP_TTL_MINUTES * 60 * 1000);
-  const otpHash = hashToken(`${email}:${otp}`);
+  const otpHash = hashToken(`${normalizedEmail}:${otp}`);
   await otpCollection.updateOne(
-    { email },
+    { email: normalizedEmail },
     {
       $set: {
         otpHash,
@@ -112,13 +142,22 @@ async function fetchOtpRecord(email) {
   if (!otpCollection) {
     return null;
   }
-  return otpCollection.findOne({ email });
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail) {
+    return null;
+  }
+  return otpCollection.findOne({ email: normalizedEmail });
 }
 
 async function deleteOtpRecord(email) {
-  if (otpCollection) {
-    await otpCollection.deleteOne({ email });
+  if (!otpCollection) {
+    return;
   }
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail) {
+    return;
+  }
+  await otpCollection.deleteOne({ email: normalizedEmail });
 }
 
 // Initialize database collections
@@ -604,19 +643,28 @@ app.post('/auth/google', async (req, res) => {
     // For now, we'll trust the client-side verification
     
     const { email, name, photo, id: googleId } = user;
+    const normalizedEmail = normalizeEmail(email);
+    const emailFilter = buildEmailQuery(normalizedEmail);
     const now = new Date();
     
     // Check if user exists
-    let existingUser = await usersCollection.findOne({ email });
+    if (!normalizedEmail) {
+      return res.status(400).json({
+        error: { code: 'VALIDATION_ERROR', message: 'Valid email is required' }
+      });
+    }
+    let existingUser = emailFilter ? await usersCollection.findOne(emailFilter) : null;
     
     if (existingUser) {
       await usersCollection.updateOne(
-        { email },
+        { _id: existingUser._id },
         { 
           $set: { 
             lastLogin: now,
             name,
-            photo
+            photo,
+            email: normalizedEmail,
+            emailNormalized: normalizedEmail
           } 
         }
       );
@@ -624,13 +672,15 @@ app.post('/auth/google', async (req, res) => {
         ...existingUser,
         name,
         photo,
-        lastLogin: now
+        lastLogin: now,
+        email: normalizedEmail,
+        emailNormalized: normalizedEmail
       };
 
       const session = await createSession(existingUser._id, req);
       setSessionCookie(res, session.token, session.expiresAt);
       
-      logger.info('User logged in via Google', { userId: existingUser._id.toString(), email });
+      logger.info('User logged in via Google', { userId: existingUser._id.toString(), email: normalizedEmail });
       
       return res.json({
         status: 'success',
@@ -648,7 +698,8 @@ app.post('/auth/google', async (req, res) => {
     // Create new user
     const newUser = {
       googleId,
-      email,
+      email: normalizedEmail,
+      emailNormalized: normalizedEmail,
       name,
       photo,
       createdAt: now,
@@ -665,7 +716,7 @@ app.post('/auth/google', async (req, res) => {
     const duration = Date.now() - startTime;
     logger.info('New user registered via Google', { 
       userId: result.insertedId.toString(),
-      email,
+      email: normalizedEmail,
       durationMs: duration
     });
     
@@ -844,9 +895,11 @@ app.post('/auth/send-otp', async (req, res) => {
     console.log('Body:', req.body);
     console.log('SENDGRID_API_KEY:', process.env.SENDGRID_API_KEY ? 'OK' : 'MISSING');
     console.log('SENDGRID_FROM:', process.env.SENDGRID_FROM);
-    const { email } = req.body;
+    const rawEmail = typeof req.body.email === 'string' ? req.body.email : '';
+    const normalizedEmail = normalizeEmail(rawEmail);
+    const deliveryEmail = rawEmail.trim() || normalizedEmail;
     
-    if (!email || !email.includes('@')) {
+    if (!normalizedEmail || !normalizedEmail.includes('@')) {
       return res.status(400).json({
         error: { code: 'VALIDATION_ERROR', message: 'Valid email is required' }
       });
@@ -870,12 +923,12 @@ app.post('/auth/send-otp', async (req, res) => {
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     
     // Persist OTP with expiration
-    await persistOtpRecord(email, otp);
+    await persistOtpRecord(normalizedEmail, otp);
     
     // Send OTP email via SendGrid
-    await sendOtpEmail(email, otp);
+    await sendOtpEmail(deliveryEmail, otp);
     
-    logger.info('OTP sent successfully', { email });
+    logger.info('OTP sent successfully', { email: normalizedEmail });
     
     res.json({
       status: 'success',
@@ -904,16 +957,18 @@ app.post('/auth/verify-otp', async (req, res) => {
   try {
     const { email, otp, name, landSize, soilType, phone, language } = req.body;
     const sanitizedPhone = typeof phone === 'string' ? phone.trim() : '';
+    const normalizedEmail = normalizeEmail(email);
+    const emailFilter = buildEmailQuery(normalizedEmail);
     const preferredLanguage = typeof language === 'string' && language.trim().length > 0 ? language.trim() : null;
     
-    if (!email || !otp) {
+    if (!normalizedEmail || !otp) {
       return res.status(400).json({
         error: { code: 'VALIDATION_ERROR', message: 'Email and OTP are required' }
       });
     }
     
     // Check if OTP exists
-    const otpRecord = await fetchOtpRecord(email);
+    const otpRecord = await fetchOtpRecord(normalizedEmail);
 
     if (!otpRecord) {
       return res.status(400).json({
@@ -937,17 +992,17 @@ app.post('/auth/verify-otp', async (req, res) => {
       });
     }
 
-    const providedHash = hashToken(`${email}:${otp}`);
+    const providedHash = hashToken(`${normalizedEmail}:${otp}`);
     if (otpRecord.otpHash !== providedHash) {
       const nextAttempts = attempts + 1;
       if (nextAttempts >= OTP_MAX_ATTEMPTS) {
-        await deleteOtpRecord(email);
+        await deleteOtpRecord(normalizedEmail);
         return res.status(400).json({
           error: { code: 'TOO_MANY_ATTEMPTS', message: 'Too many failed attempts. Please request a new OTP.' }
         });
       }
       await otpCollection.updateOne(
-        { email },
+        { email: normalizedEmail },
         { $set: { attempts: nextAttempts, lastAttemptAt: nowTs } }
       );
       return res.status(400).json({
@@ -956,14 +1011,17 @@ app.post('/auth/verify-otp', async (req, res) => {
     }
 
     // OTP verified - clear it
-    await deleteOtpRecord(email);
+    await deleteOtpRecord(normalizedEmail);
     
     // Check if user exists
-    let existingUser = await usersCollection.findOne({ email });
+    let existingUser = emailFilter ? await usersCollection.findOne(emailFilter) : null;
     
     if (existingUser) {
       const now = new Date();
-      const updateFields = { lastLogin: now };
+      const updateFields = { lastLogin: now, emailNormalized: normalizedEmail };
+      if (existingUser.email !== normalizedEmail) {
+        updateFields.email = normalizedEmail;
+      }
       if (sanitizedPhone) {
         updateFields.phone = sanitizedPhone;
         updateFields['profile.phone'] = sanitizedPhone;
@@ -973,11 +1031,12 @@ app.post('/auth/verify-otp', async (req, res) => {
         updateFields['profile.language'] = preferredLanguage;
       }
       await usersCollection.updateOne(
-        { email },
+        { _id: existingUser._id },
         { $set: updateFields }
       );
       existingUser = {
         ...existingUser,
+        ...('email' in updateFields ? { email: normalizedEmail } : {}),
         ...('phone' in updateFields ? { phone: sanitizedPhone } : {}),
         lastLogin: now,
         profile: {
@@ -985,15 +1044,16 @@ app.post('/auth/verify-otp', async (req, res) => {
           ...(sanitizedPhone ? { phone: sanitizedPhone } : {}),
           ...(preferredLanguage ? { language: preferredLanguage } : {})
         },
-        preferredLanguage: preferredLanguage || existingUser.preferredLanguage || existingUser.profile?.language
+        preferredLanguage: preferredLanguage || existingUser.preferredLanguage || existingUser.profile?.language,
+        emailNormalized: normalizedEmail
       };
 
-      await ensureUserMemoryDocument(existingUser._id?.toString() || email);
+      await ensureUserMemoryDocument(existingUser._id?.toString() || normalizedEmail);
 
       const session = await createSession(existingUser._id, req);
       setSessionCookie(res, session.token, session.expiresAt);
       
-      logger.info('User logged in via email OTP', { userId: existingUser._id.toString(), email });
+      logger.info('User logged in via email OTP', { userId: existingUser._id.toString(), email: normalizedEmail });
       
       return res.json({
         status: 'success',
@@ -1007,7 +1067,7 @@ app.post('/auth/verify-otp', async (req, res) => {
       });
     } else {
       // New user - signup (fallback values for optional fields)
-      const derivedName = name?.trim() || email.split('@')[0] || 'KrushiMitra Farmer';
+      const derivedName = name?.trim() || normalizedEmail.split('@')[0] || 'KrushiMitra Farmer';
       if (!sanitizedPhone) {
         return res.status(400).json({
           error: { code: 'VALIDATION_ERROR', message: 'Phone number is required for new users' }
@@ -1016,7 +1076,8 @@ app.post('/auth/verify-otp', async (req, res) => {
       const now = new Date();
       const userLanguage = preferredLanguage || 'hi';
       const newUser = {
-        email,
+        email: normalizedEmail,
+        emailNormalized: normalizedEmail,
         name: derivedName,
         phone: sanitizedPhone,
         photo: null,
@@ -1039,7 +1100,7 @@ app.post('/auth/verify-otp', async (req, res) => {
       const session = await createSession(result.insertedId, req);
       setSessionCookie(res, session.token, session.expiresAt);
       
-      logger.info('New user registered via email OTP', { userId: result.insertedId.toString(), email });
+      logger.info('New user registered via email OTP', { userId: result.insertedId.toString(), email: normalizedEmail });
       
       return res.json({
         status: 'success',
