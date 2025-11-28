@@ -32,6 +32,7 @@ const normalizeLanguage = (lang = "hi") => {
 		if (LANGUAGE_ALIASES[short]) return LANGUAGE_ALIASES[short];
 		if (short.length === 2) return short;
 	}
+};
 const DEFAULT_OUTPUT = path.join(__dirname, "speech.mp3");
 const MAX_CHARS_PER_REQUEST = 4500; // Google Cloud TTS hard limit is ~5000 chars
 
