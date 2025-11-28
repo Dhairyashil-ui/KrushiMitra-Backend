@@ -42,6 +42,21 @@ function sanitizeProfile(profile = {}, fallback = {}) {
   };
 }
 
+function sanitizeUserData(userData = {}) {
+  if (!userData || typeof userData !== 'object') {
+    return {};
+  }
+  return {
+    ...(userData.name ? { name: userData.name } : {}),
+    ...(userData.email ? { email: userData.email } : {}),
+    ...(userData.phone ? { phone: userData.phone } : {}),
+    ...(userData.language ? { language: userData.language } : {}),
+    ...(userData.landSize ? { landSize: userData.landSize } : {}),
+    ...(userData.soilType ? { soilType: userData.soilType } : {}),
+    ...(userData.crops ? { crops: userData.crops } : {}),
+  };
+}
+
 function sanitizeLocation(location = {}) {
   if (!location || typeof location !== 'object') {
     return null;
@@ -109,33 +124,45 @@ async function ensureUserContext(userId, profile = {}) {
     return null;
   }
   const now = new Date();
-  const sanitizedProfile = sanitizeProfile(profile, profile);
+  
+  // Build userData object from profile
+  const userData = {
+    ...sanitizeUserData(profile),
+    location: null,
+    weather: null
+  };
   
   // Check if document exists
   const existing = await collection.findOne({ userId: normalizedId });
   
   if (existing) {
-    // Update existing user's profile and updatedAt
+    // Update existing user's userData (preserving location/weather if not provided)
+    const updateData = { ...userData };
+    if (existing.userData?.location) {
+      updateData.location = existing.userData.location;
+    }
+    if (existing.userData?.weather) {
+      updateData.weather = existing.userData.weather;
+    }
+    
     await collection.updateOne(
       { userId: normalizedId },
       {
         $set: {
-          profile: sanitizedProfile,
+          userData: updateData,
           updatedAt: now
         }
       }
     );
   } else {
-    // Create new user context
+    // Create new user context with userData and query sections
     await collection.updateOne(
       { userId: normalizedId },
       {
         $setOnInsert: {
           userId: normalizedId,
-          profile: sanitizedProfile,
-          location: null,
-          weather: null,
-          chats: [],
+          userData: userData,
+          query: [],  // Last 5 AI conversations
           createdAt: now,
           updatedAt: now
         }
@@ -154,49 +181,25 @@ async function updateLocationAndWeather(userId, { profile = {}, location, weathe
     return null;
   }
   
-  // Only update profile if it has meaningful data
-  const hasProfileData = profile && (
-    profile.name || profile.email || profile.phone || profile.language
-  );
-  
-  if (hasProfileData) {
-    await ensureUserContext(userId, profile);
-  } else {
-    // Ensure document exists without updating profile
-    const existing = await collection.findOne({ userId: normalizedId });
-    if (!existing) {
-      // Create minimal document
-      await collection.updateOne(
-        { userId: normalizedId },
-        {
-          $setOnInsert: {
-            userId: normalizedId,
-            profile: { name: null, email: null, phone: null, language: null },
-            location: null,
-            weather: null,
-            chats: [],
-            createdAt: new Date(),
-            updatedAt: new Date()
-          }
-        },
-        { upsert: true }
-      );
-    }
-  }
+  // Ensure document exists
+  await ensureUserContext(userId, profile);
   
   const update = {
     $set: {
       updatedAt: new Date()
     }
   };
+  
   const sanitizedLocation = sanitizeLocation(location);
   const sanitizedWeather = sanitizeWeather(weather);
+  
   if (sanitizedLocation) {
-    update.$set.location = sanitizedLocation;
+    update.$set['userData.location'] = sanitizedLocation;
   }
   if (sanitizedWeather) {
-    update.$set.weather = sanitizedWeather;
+    update.$set['userData.weather'] = sanitizedWeather;
   }
+  
   await collection.updateOne({ userId: normalizedId }, update);
   return collection.findOne({ userId: normalizedId });
 }
@@ -208,29 +211,12 @@ async function appendChatMessage(userId, chatEntry = {}) {
     return null;
   }
   
-  // Ensure document exists without overwriting profile
+  // Ensure document exists
   const existing = await collection.findOne({ userId: normalizedId });
   if (!existing) {
-    // Create minimal document if it doesn't exist
     const sampleEntry = Array.isArray(chatEntry) ? chatEntry[0] : chatEntry;
     const profile = sampleEntry?.profile || {};
-    const hasProfileData = profile.name || profile.email || profile.phone || profile.language;
-    
-    await collection.updateOne(
-      { userId: normalizedId },
-      {
-        $setOnInsert: {
-          userId: normalizedId,
-          profile: hasProfileData ? sanitizeProfile(profile, profile) : { name: null, email: null, phone: null, language: null },
-          location: null,
-          weather: null,
-          chats: [],
-          createdAt: new Date(),
-          updatedAt: new Date()
-        }
-      },
-      { upsert: true }
-    );
+    await ensureUserContext(normalizedId, profile);
   }
 
   const entries = (Array.isArray(chatEntry) ? chatEntry : [chatEntry])
@@ -238,22 +224,21 @@ async function appendChatMessage(userId, chatEntry = {}) {
       const messageText = entry?.message ? entry.message.toString() : '';
       return {
         role: entry?.role === 'assistant' ? 'assistant' : 'user',
-        message: messageText,
-        metadata: entry?.metadata || {},
-        timestamp: entry?.timestamp || new Date()
+        message: messageText
       };
     })
     .filter((entry) => entry.message && entry.message.trim().length > 0);
 
   if (entries.length === 0) {
-    return collection.findOne({ userId: normalizedId }, { projection: { chats: 1, userId: 1 } });
+    return collection.findOne({ userId: normalizedId }, { projection: { query: 1, userId: 1 } });
   }
 
+  // Append to query array with $slice: -5 to keep only last 5
   await collection.updateOne(
     { userId: normalizedId },
     {
       $push: {
-        chats: {
+        query: {
           $each: entries,
           $slice: -5
         }
@@ -261,7 +246,7 @@ async function appendChatMessage(userId, chatEntry = {}) {
       $set: { updatedAt: new Date() }
     }
   );
-  return collection.findOne({ userId: normalizedId }, { projection: { chats: 1, userId: 1 } });
+  return collection.findOne({ userId: normalizedId }, { projection: { query: 1, userId: 1 } });
 }
 
 async function fetchUserContext(userId) {
@@ -279,5 +264,6 @@ module.exports = {
   updateLocationAndWeather,
   appendChatMessage,
   fetchUserContext,
-  sanitizeProfile
+  sanitizeProfile,
+  sanitizeUserData
 };
