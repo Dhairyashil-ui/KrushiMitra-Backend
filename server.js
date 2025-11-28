@@ -3,12 +3,6 @@ require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') }
 
 const express = require('express');
 const cookieParser = require('cookie-parser');
-let cors;
-try {
-  cors = require('cors');
-} catch (e) {
-  console.warn('cors package not found; using manual CORS headers. Install it with npm i cors for enhanced handling.');
-}
 const { connectToDatabase } = require('./db');
 const { logger, logDBOperation, logDBError } = require('./logger');
 const fs = require('fs');
@@ -34,34 +28,54 @@ const SESSION_COOKIE_NAME = 'session_token';
 const SESSION_DEFAULT_DAYS = Number(process.env.SESSION_TTL_DAYS || 30);
 const SESSION_SECURE = process.env.NODE_ENV === 'production';
 
-// Global CORS (first middleware): either use cors package or manual implementation
-if (cors) {
-  app.use(
-    cors({
-      origin: '*',
-      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization', 'ngrok-skip-browser-warning'],
-      exposedHeaders: ['Content-Type'],
-    })
-  );
-} else {
-  app.use((req, res, next) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, ngrok-skip-browser-warning');
-    if (req.method === 'OPTIONS') {
-      return res.sendStatus(204);
+// Centralized CORS configuration
+const rawAllowedOrigins = process.env.CORS_ALLOWED_ORIGINS || '*';
+const allowedOrigins = rawAllowedOrigins.split(',').map(origin => origin.trim()).filter(Boolean);
+const allowAllOrigins = allowedOrigins.includes('*');
+const allowCredentials = process.env.CORS_ALLOW_CREDENTIALS === 'true';
+const exposedHeaders = process.env.CORS_EXPOSE_HEADERS || 'Content-Type';
+
+function setCorsHeaders(req, res) {
+  const requestOrigin = req.headers.origin;
+  let originToSend = '*';
+
+  if (!allowAllOrigins) {
+    if (requestOrigin && allowedOrigins.includes(requestOrigin)) {
+      originToSend = requestOrigin;
+    } else if (allowedOrigins.length > 0) {
+      originToSend = allowedOrigins[0];
+    } else {
+      originToSend = '';
     }
-    next();
-  });
+  }
+
+  if (originToSend) {
+    res.setHeader('Access-Control-Allow-Origin', originToSend);
+    if (!allowAllOrigins) {
+      res.setHeader('Vary', 'Origin');
+    }
+  }
+
+  const requestedHeaders = req.headers['access-control-request-headers'];
+  const headersToAllow = requestedHeaders || 'Content-Type, Authorization, ngrok-skip-browser-warning';
+
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', headersToAllow);
+  res.setHeader('Access-Control-Expose-Headers', exposedHeaders);
+  res.setHeader('Access-Control-Max-Age', '86400');
+
+  if (allowCredentials && originToSend && originToSend !== '*') {
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+  }
 }
 
-// Explicit preflight handler (ensures Authorization header allowed before auth middleware)
-app.options('*', (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, ngrok-skip-browser-warning');
-  return res.sendStatus(204);
+// Apply CORS headers to every request and short-circuit OPTIONS preflight
+app.use((req, res, next) => {
+  setCorsHeaders(req, res);
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+  next();
 });
 
 const PORT = process.env.PORT || 3001;
@@ -435,23 +449,10 @@ async function verifyFirebaseToken(idToken) {
 }
 
 // Middleware to authenticate requests
-function setCorsHeaders(res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-}
-
-app.use((req, res, next) => {
-  setCorsHeaders(res);
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(204);
-  }
-  next();
-});
 
 // Authentication disabled: middleware now permits all requests.
 async function authenticate(req, res, next) {
-  setCorsHeaders(res); // keep CORS headers consistent
+  setCorsHeaders(req, res); // keep CORS headers consistent
   req.userId = 'anonymous';
   return next();
 }
