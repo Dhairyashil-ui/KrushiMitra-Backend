@@ -1068,7 +1068,7 @@ app.post('/auth/verify-otp', async (req, res) => {
           ...(existingUser.profile || {}),
           ...(sanitizedPhone ? { phone: sanitizedPhone } : {}),
           ...(sanitizedName ? { name: sanitizedName } : {}),
-          ...(preferredLanguage ? { language: preferredLanguage } : {})
+          ...(preferredLanguage ? { language: preferredLanguage } : {}),
           ...(landSize ? { landSize: landSize?.toString() || '' } : {}),
           ...(soilType ? { soilType } : {})
         },
