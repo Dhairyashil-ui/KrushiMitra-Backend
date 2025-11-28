@@ -441,14 +441,19 @@ function setCorsHeaders(res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 }
 
-// Allow all routes to answer CORS preflight before any handlers run
-app.use((req, res, next) => {
-  setCorsHeaders(res);
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(204);
-  }
-  next();
-});
+const cors = require("cors");
+
+app.use(
+  cors({
+    origin: "*",
+    methods: ["GET", "POST", "OPTIONS"],
+    allowedHeaders: ["Content-Type"],
+  })
+);
+
+// Handle preflight manually
+app.options("*", cors());
+
 // Authentication disabled: middleware now permits all requests.
 async function authenticate(req, res, next) {
   setCorsHeaders(res); // keep CORS headers consistent
