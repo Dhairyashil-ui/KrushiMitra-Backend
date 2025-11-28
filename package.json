@@ -15,6 +15,7 @@
     "test": "jest --runInBand"
   },
   "dependencies": {
+    "@google-cloud/text-to-speech": "^6.4.0",
     "@google/generative-ai": "^0.24.1",
     "@sendgrid/mail": "^8.1.6",
     "cookie-parser": "^1.4.6",
@@ -37,3 +38,4 @@
     "supertest": "^6.3.4"
   }
 }
+
