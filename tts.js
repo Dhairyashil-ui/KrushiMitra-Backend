@@ -2,29 +2,7 @@
 
 const fs = require("fs");
 const path = require("path");
-const { Readable } = require("stream");
-const { pipeline } = require("stream/promises");
-const fetch = global.fetch || require('node-fetch');
-
-// NOTE: Prefer setting process.env.ELEVENLABS_API_KEY in your environment.
-// The fallback here uses the user-provided key for convenience.
-const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY || "sk_c3b09109d2b1280789eec94db38ba2adf16ea7e6140c844e"; // Replace if needed
-
-const ELEVEN_TTS_BASE_URL = "https://api.elevenlabs.io/v1/text-to-speech";
-const DEFAULT_MODEL_ID = "eleven_multilingual_v2";
-
-// Only use Niraj - Hindi Narrator voice for all TTS
-const NIRAJ_VOICE_ID = "9BWtsMINqrJLrRacOk9x"; // Niraj - Hindi Narrator
-
-// Always use Niraj voice for all languages
-const getDefaultVoiceId = (lang) => {
-	return NIRAJ_VOICE_ID; // Always return Niraj voice only
-};
-
-const GOOGLE_TTS_BASE_URLS = [
-	"https://translate.googleapis.com/translate_tts",
-	"https://translate.google.com/translate_tts",
-];
+const textToSpeech = require("@google-cloud/text-to-speech");
 
 const LANGUAGE_ALIASES = {
 	hi: "hi",
@@ -54,65 +32,129 @@ const normalizeLanguage = (lang = "hi") => {
 		if (LANGUAGE_ALIASES[short]) return LANGUAGE_ALIASES[short];
 		if (short.length === 2) return short;
 	}
-	return trimmed.slice(0, 2) || "hi";
+const DEFAULT_OUTPUT = path.join(__dirname, "speech.mp3");
+const MAX_CHARS_PER_REQUEST = 4500; // Google Cloud TTS hard limit is ~5000 chars
+
+const VOICE_PREFERENCES = {
+	hi: { languageCode: "hi-IN", name: "hi-IN-Standard-A", ssmlGender: "FEMALE" },
+	mr: { languageCode: "mr-IN", name: "mr-IN-Standard-A", ssmlGender: "FEMALE" },
+	ml: { languageCode: "ml-IN", name: "ml-IN-Standard-A", ssmlGender: "FEMALE" },
+	en: { languageCode: "en-IN", name: "en-IN-Neural2-C", ssmlGender: "FEMALE" },
+	bn: { languageCode: "bn-IN", name: "bn-IN-Standard-A", ssmlGender: "FEMALE" },
+	ta: { languageCode: "ta-IN", name: "ta-IN-Standard-A", ssmlGender: "FEMALE" },
+	te: { languageCode: "te-IN", name: "te-IN-Standard-A", ssmlGender: "FEMALE" },
+	kn: { languageCode: "kn-IN", name: "kn-IN-Standard-A", ssmlGender: "FEMALE" },
+	gu: { languageCode: "gu-IN", name: "gu-IN-Standard-A", ssmlGender: "FEMALE" },
+	or: { languageCode: "or-IN", name: "or-IN-Standard-A", ssmlGender: "FEMALE" },
+	as: { languageCode: "as-IN", name: "as-IN-Standard-A", ssmlGender: "FEMALE" },
 };
 
-/**
- * Generate speech using Google Translate TTS (free, no API key required).
- * Google endpoint rejects long inputs (> ~200 chars). We chunk text to avoid 400 errors.
- * If Google still fails, we throw a descriptive error (no silent fallback to paid services).
- *
- * @param {string} text
- * @param {"hi"|"mr"|"ml"|"en"} lang
- * @param {{ outputFile?: string }} options
- * @returns {Promise<string>}
- */
+const DEFAULT_VOICE = {
+	languageCode: "en-IN",
+	name: "en-IN-Neural2-C",
+	ssmlGender: "FEMALE",
+};
+
+const speakingRate = sanitizeFloat(process.env.GOOGLE_TTS_SPEAKING_RATE, 1.0);
+const pitch = sanitizeFloat(process.env.GOOGLE_TTS_PITCH, 0);
+const audioEncoding = process.env.GOOGLE_TTS_AUDIO_ENCODING || "MP3";
+
+const ttsClient = createClient();
+
+function createClient() {
+	const base64Credentials = process.env.GOOGLE_TTS_CREDENTIALS;
+	if (base64Credentials) {
+		try {
+			const decoded = Buffer.from(base64Credentials, "base64").toString("utf8");
+			const credentials = JSON.parse(decoded);
+			return new textToSpeech.TextToSpeechClient({ credentials });
+		} catch (error) {
+			throw new Error(`Invalid GOOGLE_TTS_CREDENTIALS: ${error.message}`);
+		}
+	}
+	return new textToSpeech.TextToSpeechClient();
+}
+
+function sanitizeFloat(value, fallback) {
+	if (value === undefined || value === null || value === "") return fallback;
+	const parsed = Number.parseFloat(value);
+	return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function chunkText(input) {
+	if (input.length <= MAX_CHARS_PER_REQUEST) {
+		return [input];
+	}
+	const parts = [];
+	let current = "";
+	for (const word of input.split(/\s+/)) {
+		const candidate = current ? `${current} ${word}` : word;
+		if (candidate.length > MAX_CHARS_PER_REQUEST) {
+			if (current) parts.push(current);
+			current = word;
+		} else {
+			current = candidate;
+		}
+	}
+	if (current) parts.push(current);
+	return parts;
+}
+
+function resolveVoice(langCode) {
+	return VOICE_PREFERENCES[langCode] || DEFAULT_VOICE;
+}
+
+function buildAudioConfig() {
+	return {
+		audioEncoding,
+		speakingRate,
+		pitch,
+	};
+}
+
+async function synthesizeChunk(textChunk, voice, audioConfig) {
+	const [response] = await ttsClient.synthesizeSpeech({
+		input: { text: textChunk },
+		voice,
+		audioConfig,
+	});
+	if (!response || !response.audioContent) {
+		throw new Error("Received empty audio from Google Cloud TTS");
+	}
+	return Buffer.from(response.audioContent);
+}
+
 async function generateSpeech(text, lang = "hi", options = {}) {
 	if (!text || typeof text !== "string") {
 		throw new Error("generateSpeech: 'text' must be a non-empty string");
 	}
 
-	// Sanitize & trim
-	text = text.trim().replace(/\s+/g, ' ');
-	const normalizedLang = normalizeLanguage(lang);
+	const trimmed = text.trim().replace(/\s+/g, " ");
+	if (!trimmed) {
+		throw new Error("generateSpeech: text is empty after trimming");
+	}
 
-	const outputFile = options.outputFile || path.join(__dirname, "speech.mp3");
+	const normalizedLang = normalizeLanguage(lang);
+	const voice = resolveVoice(normalizedLang);
+	const audioConfig = buildAudioConfig();
+	const chunks = chunkText(trimmed);
+	const outputFile = options.outputFile || DEFAULT_OUTPUT;
 	await fs.promises.mkdir(path.dirname(outputFile), { recursive: true });
 
-	// Max safe length per Google Translate TTS request
-	const MAX_CHARS = 180; // keep well under 200 to reduce rejection risk
+	console.log(
+		`Using Google Cloud TTS voice=${voice.name} lang=${voice.languageCode} chunks=${chunks.length}`
+	);
 
-	function chunkText(input) {
-		if (input.length <= MAX_CHARS) return [input];
-		const parts = [];
-		let current = '';
-		for (const word of input.split(/\s+/)) {
-			// If adding the word exceeds limit, push current and start new
-			if ((current + ' ' + word).trim().length > MAX_CHARS) {
-				if (current) parts.push(current.trim());
-				current = word;
-			} else {
-				current += (current ? ' ' : '') + word;
-			}
-		}
-		if (current) parts.push(current.trim());
-		return parts;
+	const audioBuffers = [];
+	for (let i = 0; i < chunks.length; i++) {
+		const chunk = chunks[i];
+		console.log(`🔊 [GCP TTS] chunk ${i + 1}/${chunks.length} (${chunk.length} chars)`);
+		const buffer = await synthesizeChunk(chunk, voice, audioConfig);
+		audioBuffers.push(buffer);
 	}
 
-	const segments = chunkText(text);
-	console.log(`Using Google TTS (${normalizedLang}) with ${segments.length} segment(s)`);
-
-	const buffers = [];
-	for (let i = 0; i < segments.length; i++) {
-		const seg = segments[i];
-		console.log(`🔊 [TTS] Segment ${i+1}/${segments.length} length=${seg.length}`);
-		const buffer = await fetchSegmentWithFallback(seg, normalizedLang, i, segments.length);
-		buffers.push(buffer);
-	}
-
-	// Concatenate mp3 buffers – each segment is an MP3. Google returns raw MP3 data without ID3 tags typically, so byte concat works.
-	await fs.promises.writeFile(outputFile, Buffer.concat(buffers));
-	console.log(`✅ TTS synthesis complete (${lang}) -> ${outputFile}`);
+	await fs.promises.writeFile(outputFile, Buffer.concat(audioBuffers));
+	console.log(`✅ Google Cloud TTS synthesis complete (${normalizedLang}) -> ${outputFile}`);
 	return outputFile;
 }
 
@@ -120,59 +162,11 @@ module.exports = {
 	generateSpeech,
 };
 
-async function fetchSegmentWithFallback(segment, lang, idx, total) {
-	const params = new URLSearchParams({
-		ie: 'UTF-8',
-		q: segment,
-		tl: lang,
-		client: 'tw-ob',
-		idx: String(idx),
-		total: String(total),
-		textlen: String(segment.length),
-		ttsspeed: '1',
-	});
-
-	let lastError;
-	for (const baseUrl of GOOGLE_TTS_BASE_URLS) {
-		const url = `${baseUrl}?${params.toString()}`;
-		try {
-			const response = await fetch(url, {
-				headers: {
-					'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-				},
-			});
-			if (response.ok) {
-				const arrayBuf = await response.arrayBuffer();
-				return Buffer.from(arrayBuf);
-			}
-			const errText = await safeReadText(response);
-			lastError = `(${baseUrl}) ${response.status} ${response.statusText} ${errText}`;
-			if (response.status >= 500) {
-				continue; // try the other host for transient errors
-			}
-		} catch (err) {
-			lastError = `(${baseUrl}) ${err.message}`;
-			continue;
-		}
-	}
-	throw new Error(`Google TTS failed (segment ${idx + 1}): ${lastError || 'Unknown error'}`);
-}
-
-async function safeReadText(response) {
-	try {
-		const raw = await response.text();
-		return raw.length > 240 ? `${raw.slice(0, 240)}…` : raw;
-	} catch (err) {
-		return err.message || 'failed to read error body';
-	}
-}
-
-// Example usage when running directly: `node tts.js`
 if (require.main === module) {
 	(async () => {
 		try {
-			const hindiText = "नमस्ते किसान भाई! कल बारिश होगी, छिड़काव से बचें।";
-			const savedPath = await generateSpeech(hindiText, "hi");
+			const sample = "नमस्ते किसान भाई! कल बारिश होगी, छिड़काव से बचें।";
+			const savedPath = await generateSpeech(sample, "hi");
 			console.log(`Speech saved to: ${savedPath}`);
 		} catch (err) {
 			console.error("Failed to generate speech:", err);
