@@ -110,33 +110,80 @@ async function ensureUserContext(userId, profile = {}) {
   }
   const now = new Date();
   const sanitizedProfile = sanitizeProfile(profile, profile);
-  await collection.updateOne(
-    { userId: normalizedId },
-    {
-      $setOnInsert: {
-        userId: normalizedId,
-        profile: sanitizedProfile,
-        location: null,
-        weather: null,
-        chats: [],
-        createdAt: now
-      },
-      $set: {
-        profile: sanitizedProfile,
-        updatedAt: now
+  
+  // Check if document exists
+  const existing = await collection.findOne({ userId: normalizedId });
+  
+  if (existing) {
+    // Update existing user's profile and updatedAt
+    await collection.updateOne(
+      { userId: normalizedId },
+      {
+        $set: {
+          profile: sanitizedProfile,
+          updatedAt: now
+        }
       }
-    },
-    { upsert: true }
-  );
+    );
+  } else {
+    // Create new user context
+    await collection.updateOne(
+      { userId: normalizedId },
+      {
+        $setOnInsert: {
+          userId: normalizedId,
+          profile: sanitizedProfile,
+          location: null,
+          weather: null,
+          chats: [],
+          createdAt: now,
+          updatedAt: now
+        }
+      },
+      { upsert: true }
+    );
+  }
+  
   return normalizedId;
 }
 
 async function updateLocationAndWeather(userId, { profile = {}, location, weather } = {}) {
   const collection = getCollection();
-  const normalizedId = await ensureUserContext(userId, profile);
+  const normalizedId = normalizeObjectId(userId);
   if (!normalizedId) {
     return null;
   }
+  
+  // Only update profile if it has meaningful data
+  const hasProfileData = profile && (
+    profile.name || profile.email || profile.phone || profile.language
+  );
+  
+  if (hasProfileData) {
+    await ensureUserContext(userId, profile);
+  } else {
+    // Ensure document exists without updating profile
+    const existing = await collection.findOne({ userId: normalizedId });
+    if (!existing) {
+      // Create minimal document
+      await collection.updateOne(
+        { userId: normalizedId },
+        {
+          $setOnInsert: {
+            userId: normalizedId,
+            profile: { name: null, email: null, phone: null, language: null },
+            location: null,
+            weather: null,
+            chats: [],
+            createdAt: new Date(),
+            updatedAt: new Date()
+          }
+        },
+        { upsert: true }
+      );
+    }
+  }
+  
   const update = {
     $set: {
       updatedAt: new Date()
@@ -150,16 +197,40 @@ async function updateLocationAndWeather(userId, { profile = {}, location, weathe
   if (sanitizedWeather) {
     update.$set.weather = sanitizedWeather;
   }
-  await collection.updateOne({ userId: normalizedId }, update, { upsert: true });
+  await collection.updateOne({ userId: normalizedId }, update);
   return collection.findOne({ userId: normalizedId });
 }
 
 async function appendChatMessage(userId, chatEntry = {}) {
   const collection = getCollection();
-  const sampleEntry = Array.isArray(chatEntry) ? chatEntry[0] : chatEntry;
-  const normalizedId = await ensureUserContext(userId, sampleEntry?.profile || {});
+  const normalizedId = normalizeObjectId(userId);
   if (!normalizedId) {
     return null;
+  }
+  
+  // Ensure document exists without overwriting profile
+  const existing = await collection.findOne({ userId: normalizedId });
+  if (!existing) {
+    // Create minimal document if it doesn't exist
+    const sampleEntry = Array.isArray(chatEntry) ? chatEntry[0] : chatEntry;
+    const profile = sampleEntry?.profile || {};
+    const hasProfileData = profile.name || profile.email || profile.phone || profile.language;
+    
+    await collection.updateOne(
+      { userId: normalizedId },
+      {
+        $setOnInsert: {
+          userId: normalizedId,
+          profile: hasProfileData ? sanitizeProfile(profile, profile) : { name: null, email: null, phone: null, language: null },
+          location: null,
+          weather: null,
+          chats: [],
+          createdAt: new Date(),
+          updatedAt: new Date()
+        }
+      },
+      { upsert: true }
+    );
   }
 
   const entries = (Array.isArray(chatEntry) ? chatEntry : [chatEntry])
