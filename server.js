@@ -14,7 +14,22 @@ if (process.env.GOOGLE_CREDENTIALS_JSON) {
     process.env.GOOGLE_APPLICATION_CREDENTIALS = keyFilePath;
     console.log("GCP credentials ready at:", process.env.GOOGLE_APPLICATION_CREDENTIALS);
   } catch (err) {
+const gcpCredentialPath = path.join(process.cwd(), process.env.GOOGLE_CREDENTIALS_FILENAME || 'gcp-key.json');
+
+if (process.env.GOOGLE_CREDENTIALS_JSON) {
+  try {
+    fs.writeFileSync(gcpCredentialPath, process.env.GOOGLE_CREDENTIALS_JSON, { encoding: 'utf8', mode: 0o600 });
+    process.env.GOOGLE_APPLICATION_CREDENTIALS = gcpCredentialPath;
+    console.log('[TTS] Google credentials prepared at', gcpCredentialPath);
+  } catch (error) {
+    console.error('[TTS] Failed to persist Google credentials file', error);
+  }
+} else {
+  console.warn('[TTS] GOOGLE_CREDENTIALS_JSON not provided; relying on default ADC chain');
+}
+
     console.error("Failed to write GCP key file:", err);
+
   }
 } else {
   console.error("GOOGLE_CREDENTIALS_JSON is missing!");
