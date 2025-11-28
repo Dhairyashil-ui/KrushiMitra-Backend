@@ -1159,14 +1159,21 @@ app.post('/auth/verify-otp', async (req, res) => {
         preferredLanguage: preferredLanguage || existingUser.preferredLanguage || existingUser.profile?.language
       };
 
-      await ensureUserContext(existingUser._id, {
-        name: existingUser.name || sanitizedName || email.split('@')[0],
-        email,
-        phone: sanitizedPhone || existingUser.phone || null,
-        language: existingUser.preferredLanguage || preferredLanguage || existingUser.profile?.language || null
-      });
+      try {
+        await ensureUserContext(existingUser._id, {
+          name: existingUser.name || sanitizedName || email.split('@')[0],
+          email,
+          phone: sanitizedPhone || existingUser.phone || null,
+          language: existingUser.preferredLanguage || preferredLanguage || existingUser.profile?.language || null
+        });
 
-      await ensureUserMemoryDocument(existingUser._id?.toString() || email);
+        await ensureUserMemoryDocument(existingUser._id?.toString() || email);
+      } catch (contextError) {
+        logger.warn('User context init skipped for existing user', {
+          userId: existingUser._id?.toString(),
+          error: contextError.message
+        });
+      }
 
       const session = await createSession(existingUser._id, req);
       setSessionCookie(res, session.token, session.expiresAt);
@@ -1213,14 +1220,21 @@ app.post('/auth/verify-otp', async (req, res) => {
       const result = await usersCollection.insertOne(newUser);
       newUser._id = result.insertedId;
 
-      await ensureUserContext(result.insertedId, {
-        name: newUser.name,
-        email: newUser.email,
-        phone: newUser.phone || null,
-        language: newUser.profile?.language || newUser.preferredLanguage || null
-      });
+      try {
+        await ensureUserContext(result.insertedId, {
+          name: newUser.name,
+          email: newUser.email,
+          phone: newUser.phone || null,
+          language: newUser.profile?.language || newUser.preferredLanguage || null
+        });
 
-      await ensureUserMemoryDocument(newUser._id.toString());
+        await ensureUserMemoryDocument(newUser._id.toString());
+      } catch (contextError) {
+        logger.warn('User context init skipped for new user', {
+          userId: result.insertedId.toString(),
+          error: contextError.message
+        });
+      }
 
       const session = await createSession(result.insertedId, req);
       setSessionCookie(res, session.token, session.expiresAt);
