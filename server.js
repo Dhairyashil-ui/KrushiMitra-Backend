@@ -443,10 +443,8 @@ function formatUserContextResponse(doc) {
   const normalizedUserId = doc.userId instanceof ObjectId ? doc.userId.toString() : doc.userId;
   return {
     userId: normalizedUserId,
-    profile: doc.profile || {},
-    location: doc.location || null,
-    weather: doc.weather || null,
-    chats: doc.chats || []
+    userData: doc.userData || {},
+    query: doc.query || []
   };
 }
 
@@ -841,6 +839,7 @@ app.put('/auth/user/:userId', async (req, res) => {
   }
 });
 
+// GET /user-context/:userId - Fetch full UserContext (userData + query)
 app.get('/user-context/:userId', authenticate, async (req, res) => {
   try {
     const { userId } = req.params;
@@ -852,7 +851,7 @@ app.get('/user-context/:userId', authenticate, async (req, res) => {
     }
     return res.json({
       status: 'success',
-      data: formatUserContextResponse(contextDoc)
+      data: formatUserContextResponse(contextDoc) // Returns: { userId, userData, query }
     });
   } catch (error) {
     logger.error('Error fetching user context', { error: error.message });
@@ -862,6 +861,7 @@ app.get('/user-context/:userId', authenticate, async (req, res) => {
   }
 });
 
+// PUT /user-context/home - Update userData.location and userData.weather
 app.put('/user-context/home', authenticate, async (req, res) => {
   try {
     const { userId, location, weather, profile } = req.body || {};
@@ -870,6 +870,8 @@ app.put('/user-context/home', authenticate, async (req, res) => {
         error: { code: 'VALIDATION_ERROR', message: 'userId is required' }
       });
     }
+    
+    // Updates only userData.location and userData.weather, preserves query
     const updatedDoc = await updateLocationAndWeather(userId, { profile, location, weather });
     if (!updatedDoc) {
       return res.status(404).json({
@@ -1712,11 +1714,20 @@ app.post('/ai/chat', authenticate, async (req, res) => {
     const memoryKey = normalizeUserKey(userDoc?._id, userIdentifier);
     const contextUserId = userDoc?._id || toObjectId(userIdentifier);
 
+    // STEP 1: Fetch full UserContext (userData + last 5 query items)
     let userContextPayload = null;
     if (contextUserId) {
       try {
         const contextDoc = await fetchUserContext(contextUserId);
         userContextPayload = formatUserContextResponse(contextDoc);
+        
+        if (userContextPayload) {
+          logger.info('UserContext loaded for AI request', {
+            userId: contextUserId?.toString(),
+            hasUserData: !!userContextPayload.userData,
+            queryCount: userContextPayload.query?.length || 0
+          });
+        }
       } catch (contextError) {
         logger.warn('Failed to fetch user context for AI chat', {
           error: contextError.message,
@@ -1729,9 +1740,10 @@ app.post('/ai/chat', authenticate, async (req, res) => {
       ? requestedLanguage.trim()
       : (userDoc?.preferredLanguage || userDoc?.profile?.language || 'en');
 
+    // STEP 2: Include UserContext in AI request payload
     const aiContextPayload = {
       ...(context || {}),
-      userContext: userContextPayload
+      userContext: userContextPayload  // Contains userData + last 5 query items
     };
 
     // Get farmer profile for context
@@ -1755,7 +1767,12 @@ app.post('/ai/chat', authenticate, async (req, res) => {
     
     const memoryEntries = await getUserMemoryEntries(memoryKey, DEFAULT_MEMORY_SLICE);
 
-    // In a real implementation, you would call the LLaMA 3 model with a prompt built from this context
+    // STEP 3: Generate AI response with full context
+    // In production, this would call your LLM (LLaMA, Mistral, etc.) with:
+    // - userContextPayload.userData (profile, location, weather)
+    // - userContextPayload.query (last 5 conversations)
+    // - query (current user question)
+    
     // For now, we'll simulate a farmer-friendly response
     let aiResponse = `Based on your query "${query}", I recommend checking the latest mandi prices for your crops and considering weather conditions in your area.`;
     
@@ -1815,24 +1832,30 @@ app.post('/ai/chat', authenticate, async (req, res) => {
     }
 
     try {
-      await appendUserMemoryEntries(memoryKey, memoryToAppend);
-    } catch (memoryError) {
-      logger.warn('Failed to append AI memory entries', {
-        error: memoryError.message,
-        userIdentifier
       });
     }
 
+    // STEP 4: Save user question and AI response to UserContext.query
     if (contextUserId) {
       try {
         await appendChatMessage(contextUserId, [
-          { role: 'user', message: query },
-          { role: 'assistant', message: aiResponse }
+          { role: 'user', message: query },        // Save user question
+          { role: 'assistant', message: aiResponse } // Save AI response
         ]);
+        
+        logger.info('Conversation saved to UserContext.query', {
+          userId: contextUserId?.toString(),
+          messagesSaved: 2
+        });
       } catch (contextAppendError) {
-        logger.warn('Failed to update UserContext chat history', {
+        logger.warn('Failed to update UserContext query array', {
           error: contextAppendError.message,
           userId: contextUserId?.toString() || userIdentifier
+        });
+      }
+    }
+    
+    const duration = Date.now() - startTime;|| userIdentifier
         });
       }
     }
