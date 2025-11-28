@@ -3,6 +3,15 @@ const { ObjectId } = require('mongodb');
 const COLLECTION_NAME = 'user_context';
 let userContextCollection;
 
+async function safelyCreateIndex(collection, keys, options) {
+  try {
+    await collection.createIndex(keys, options);
+  } catch (error) {
+    // Log but do not block server boot if indexes already exist or data conflicts
+    const label = JSON.stringify({ keys, options });
+    console.warn(`UserContext index creation skipped: ${label}`, error.message);
+  }
+}
 function normalizeObjectId(value) {
   if (!value) {
     return null;
