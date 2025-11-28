@@ -15,7 +15,6 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { generateSpeech } = require('./tts');
-const { generateFarmerPrompt } = require('./farmer-llm-prompt');
 const sgMail = require('@sendgrid/mail');
 const { ObjectId } = require('mongodb');
 
@@ -1069,7 +1068,7 @@ app.post('/auth/verify-otp', async (req, res) => {
           ...(existingUser.profile || {}),
           ...(sanitizedPhone ? { phone: sanitizedPhone } : {}),
           ...(sanitizedName ? { name: sanitizedName } : {}),
-          ...(preferredLanguage ? { language: preferredLanguage } : {}),
+          ...(preferredLanguage ? { language: preferredLanguage } : {})
           ...(landSize ? { landSize: landSize?.toString() || '' } : {}),
           ...(soilType ? { soilType } : {})
         },
@@ -1641,9 +1640,7 @@ app.post('/ai/chat', authenticate, async (req, res) => {
       memory: memoryEntries
     };
 
-    const farmerPrompt = generateFarmerPrompt(resolvedLanguage, query, promptContext);
-    
-    // In a real implementation, you would call the LLaMA 3 model with the farmerPrompt
+    // In a real implementation, you would call the LLaMA 3 model with a prompt built from this context
     // For now, we'll simulate a farmer-friendly response
     let aiResponse = `Based on your query "${query}", I recommend checking the latest mandi prices for your crops and considering weather conditions in your area.`;
     
