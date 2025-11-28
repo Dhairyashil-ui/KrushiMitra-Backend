@@ -243,6 +243,64 @@ async function appendUserMemoryEntries(userKey, newEntries = []) {
   );
 }
 
+async function findUserDocument(identifier, farmerId) {
+  if (!usersCollection) {
+    return null;
+  }
+
+  const tried = new Set();
+  const candidates = [];
+  const maybeId = toObjectId(identifier);
+  if (maybeId) {
+    candidates.push({ _id: maybeId });
+  }
+
+  const pushPhoneQueries = (value) => {
+    if (!value) {
+      return;
+    }
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return;
+    }
+    const digits = trimmed.replace(/\D/g, '');
+    candidates.push({ phone: trimmed });
+    if (digits && digits !== trimmed) {
+      candidates.push({ phone: digits });
+    }
+  };
+
+  if (typeof identifier === 'string') {
+    const trimmed = identifier.trim();
+    if (trimmed.includes('@')) {
+      candidates.push({ email: trimmed.toLowerCase() });
+    }
+    pushPhoneQueries(trimmed);
+  }
+
+  if (typeof farmerId === 'string') {
+    pushPhoneQueries(farmerId);
+  }
+
+  for (const query of candidates) {
+    const key = JSON.stringify(query);
+    if (tried.has(key)) {
+      continue;
+    }
+    tried.add(key);
+    try {
+      const user = await usersCollection.findOne(query);
+      if (user) {
+        return user;
+      }
+    } catch (error) {
+      logger.warn('User lookup failed', { query, error: error.message });
+    }
+  }
+
+  return null;
+}
+
 function hashToken(token) {
   return crypto.createHash('sha256').update(token).digest('hex');
 }
@@ -904,6 +962,7 @@ app.post('/auth/verify-otp', async (req, res) => {
   try {
     const { email, otp, name, landSize, soilType, phone, language, validateOnly } = req.body;
     const sanitizedPhone = typeof phone === 'string' ? phone.trim() : '';
+    const sanitizedName = typeof name === 'string' ? name.trim() : '';
     const preferredLanguage = typeof language === 'string' && language.trim().length > 0 ? language.trim() : null;
     
     if (!email || !otp) {
@@ -987,6 +1046,16 @@ app.post('/auth/verify-otp', async (req, res) => {
         updateFields.preferredLanguage = preferredLanguage;
         updateFields['profile.language'] = preferredLanguage;
       }
+      if (sanitizedName) {
+        updateFields.name = sanitizedName;
+        updateFields['profile.name'] = sanitizedName;
+      }
+      if (landSize) {
+        updateFields['profile.landSize'] = landSize?.toString() || '';
+      }
+      if (soilType) {
+        updateFields['profile.soilType'] = soilType;
+      }
       await usersCollection.updateOne(
         { email },
         { $set: updateFields }
@@ -994,11 +1063,15 @@ app.post('/auth/verify-otp', async (req, res) => {
       existingUser = {
         ...existingUser,
         ...('phone' in updateFields ? { phone: sanitizedPhone } : {}),
+        ...(sanitizedName ? { name: sanitizedName } : {}),
         lastLogin: now,
         profile: {
           ...(existingUser.profile || {}),
           ...(sanitizedPhone ? { phone: sanitizedPhone } : {}),
+          ...(sanitizedName ? { name: sanitizedName } : {}),
           ...(preferredLanguage ? { language: preferredLanguage } : {})
+          ...(landSize ? { landSize: landSize?.toString() || '' } : {}),
+          ...(soilType ? { soilType } : {})
         },
         preferredLanguage: preferredLanguage || existingUser.preferredLanguage || existingUser.profile?.language
       };
@@ -1022,7 +1095,7 @@ app.post('/auth/verify-otp', async (req, res) => {
       });
     } else {
       // New user - signup (fallback values for optional fields)
-      const derivedName = name?.trim() || email.split('@')[0] || 'KrushiMitra Farmer';
+      const derivedName = sanitizedName || email.split('@')[0] || 'KrushiMitra Farmer';
       if (!sanitizedPhone) {
         return res.status(400).json({
           error: { code: 'VALIDATION_ERROR', message: 'Phone number is required for new users' }
@@ -1036,6 +1109,7 @@ app.post('/auth/verify-otp', async (req, res) => {
         phone: sanitizedPhone,
         photo: null,
         profile: {
+          name: derivedName,
           phone: sanitizedPhone,
           landSize: landSize?.toString() || '',
           soilType: soilType || '',
@@ -1515,17 +1589,16 @@ app.post('/ai/chat', authenticate, async (req, res) => {
     }
     
     let userDoc = null;
-    const maybeUserObject = toObjectId(userIdentifier);
-    if (maybeUserObject) {
-      try {
-        userDoc = await usersCollection.findOne({ _id: maybeUserObject });
-      } catch (error) {
-        logger.warn('Could not fetch user document for AI context', {
-          userId: userIdentifier,
-          error: error.message
-        });
-      }
+    try {
+      userDoc = await findUserDocument(userIdentifier, farmerId);
+    } catch (lookupError) {
+      logger.warn('Could not fetch user document for AI context', {
+        userId: userIdentifier,
+        error: lookupError.message
+      });
     }
+
+    const memoryKey = normalizeUserKey(userDoc?._id, userIdentifier);
 
     const resolvedLanguage = requestedLanguage && typeof requestedLanguage === 'string' && requestedLanguage.trim().length > 0
       ? requestedLanguage.trim()
@@ -1550,14 +1623,25 @@ app.post('/ai/chat', authenticate, async (req, res) => {
       });
     }
     
-    const memoryEntries = await getUserMemoryEntries(userIdentifier, DEFAULT_MEMORY_SLICE);
+    const memoryEntries = await getUserMemoryEntries(memoryKey, DEFAULT_MEMORY_SLICE);
 
     // Generate farmer-friendly prompt for LLaMA 3
-    const farmerPrompt = generateFarmerPrompt(resolvedLanguage, query, { 
-      farmerProfile, 
+    const promptContext = {
+      farmerProfile,
+      userProfile: userDoc
+        ? {
+            id: userDoc._id?.toString(),
+            email: userDoc.email,
+            phone: userDoc.phone,
+            preferredLanguage: userDoc.preferredLanguage || userDoc.profile?.language || null,
+            profile: userDoc.profile || {}
+          }
+        : null,
       ...context,
       memory: memoryEntries
-    });
+    };
+
+    const farmerPrompt = generateFarmerPrompt(resolvedLanguage, query, promptContext);
     
     // In a real implementation, you would call the LLaMA 3 model with the farmerPrompt
     // For now, we'll simulate a farmer-friendly response
@@ -1599,11 +1683,11 @@ app.post('/ai/chat', authenticate, async (req, res) => {
     // Save AI interaction to database
     try {
       const aiInteraction = {
-        farmerId: farmerId || null,
-        userId: userIdentifier,
+        farmerId: farmerId || userDoc?.phone || memoryKey,
+        userId: memoryKey,
         query,
         response: aiResponse,
-        context: { ...context, memory: memoryEntries },
+        context: promptContext,
         language: resolvedLanguage,
         timestamp: new Date()
       };
@@ -1619,7 +1703,7 @@ app.post('/ai/chat', authenticate, async (req, res) => {
     }
 
     try {
-      await appendUserMemoryEntries(userIdentifier, memoryToAppend);
+      await appendUserMemoryEntries(memoryKey, memoryToAppend);
     } catch (memoryError) {
       logger.warn('Failed to append AI memory entries', {
         error: memoryError.message,
@@ -1629,13 +1713,13 @@ app.post('/ai/chat', authenticate, async (req, res) => {
     
     const duration = Date.now() - startTime;
     logDBOperation('aiChat', { 
-      userId: userIdentifier,
+      userId: memoryKey,
       durationMs: duration,
       status: 'success'
     });
     
     logger.info('AI chat response generated', { 
-      userId: userIdentifier,
+      userId: memoryKey,
       durationMs: duration
     });
 
@@ -2065,16 +2149,20 @@ app.post('/weather/location', authenticate, async (req, res) => {
       });
     }
     
+    const parsedLat = parseFloat(lat);
+    const parsedLon = parseFloat(lon);
+    const resolvedAddress = address?.trim() || 'Address not provided';
+
     // Prepare location document
     const locationDoc = {
       userId: userId || 'anonymous',
       location: {
         type: 'Point',
-        coordinates: [parseFloat(lon), parseFloat(lat)]
+        coordinates: [parsedLon, parsedLat]
       },
-      latitude: parseFloat(lat),
-      longitude: parseFloat(lon),
-      address: address || 'Address not provided',
+      latitude: parsedLat,
+      longitude: parsedLon,
+      address: resolvedAddress,
       timestamp: new Date(),
       lastAccessed: new Date()
     };
@@ -2089,19 +2177,54 @@ app.post('/weather/location', authenticate, async (req, res) => {
         },
         { upsert: true }
       );
+
+      let userProfileUpdated = false;
+      if (userId && userId !== 'anonymous' && usersCollection) {
+        try {
+          const resolvedUser = await findUserDocument(userId, null);
+          if (resolvedUser) {
+            await usersCollection.updateOne(
+              { _id: resolvedUser._id },
+              {
+                $set: {
+                  lastKnownLocation: {
+                    latitude: parsedLat,
+                    longitude: parsedLon,
+                    address: resolvedAddress,
+                    updatedAt: new Date()
+                  },
+                  'profile.address': resolvedAddress,
+                  'profile.location': {
+                    latitude: parsedLat,
+                    longitude: parsedLon
+                  }
+                }
+              }
+            );
+            userProfileUpdated = true;
+          }
+        } catch (userError) {
+          logger.warn('Failed to update user profile with location', {
+            userId,
+            error: userError.message
+          });
+        }
+      }
       
       const duration = Date.now() - startTime;
       logger.info('User location and address saved to database', { 
         userId: locationDoc.userId,
         lat,
         lon,
-        address,
+        address: resolvedAddress,
+        userProfileUpdated,
         durationMs: duration
       });
       
       res.status(200).json({
         status: 'success',
-        message: 'Location and address saved successfully'
+        message: 'Location and address saved successfully',
+        userProfileUpdated
       });
     } catch (dbError) {
       const duration = Date.now() - startTime;
