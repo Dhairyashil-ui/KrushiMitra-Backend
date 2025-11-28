@@ -34,6 +34,15 @@ const LANGUAGE_CODES = {
 const DEFAULT_LANGUAGE = "en-IN";
 const GOOGLE_TTS_ENDPOINT = "https://translate.googleapis.com/translate_tts";
 const MAX_CHARS_PER_REQUEST = 180; // translate_tts limit ~200 characters
+const DEFAULT_SPEED = normalizeSpeed(process.env.SIMPLE_TTS_SPEED ?? 1.05);
+
+function normalizeSpeed(value) {
+	const num = Number(value);
+	if (!Number.isFinite(num)) {
+		return 1;
+	}
+	return Math.min(4, Math.max(0.25, num));
+}
 
 function normalizeLanguageCode(lang = "hi") {
 	if (!lang || typeof lang !== "string") {
@@ -70,13 +79,16 @@ function chunkText(input) {
 	return parts;
 }
 
-function requestTTSChunk(textChunk, languageCode) {
+function requestTTSChunk(textChunk, languageCode, speed) {
 	return new Promise((resolve, reject) => {
 		const url = new URL(GOOGLE_TTS_ENDPOINT);
 		url.searchParams.set("ie", "UTF-8");
 		url.searchParams.set("client", "tw-ob");
 		url.searchParams.set("q", textChunk);
 		url.searchParams.set("tl", languageCode);
+		if (speed && Number.isFinite(speed)) {
+			url.searchParams.set("ttsspeed", speed.toFixed(2));
+		}
 
 		https
 			.get(url, {
@@ -111,15 +123,16 @@ async function generateSpeech(text, lang = "hi", options = {}) {
 	}
 
 	const languageCode = normalizeLanguageCode(lang);
+	const speed = normalizeSpeed(options.speed ?? DEFAULT_SPEED);
 	const chunks = chunkText(trimmed);
 	const audioBuffers = [];
 
 	for (let i = 0; i < chunks.length; i += 1) {
 		const chunk = chunks[i];
 		console.log(
-			`[Simple Google TTS] chunk ${i + 1}/${chunks.length} (${chunk.length} chars) lang=${languageCode}`
+			`[Simple Google TTS] chunk ${i + 1}/${chunks.length} (${chunk.length} chars) lang=${languageCode} speed=${speed}`
 		);
-		const buffer = await requestTTSChunk(chunk, languageCode);
+		const buffer = await requestTTSChunk(chunk, languageCode, speed);
 		audioBuffers.push(buffer);
 	}
 
@@ -152,3 +165,4 @@ if (require.main === module) {
 		}
 	})();
 }
+
