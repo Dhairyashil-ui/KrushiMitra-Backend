@@ -441,18 +441,13 @@ function setCorsHeaders(res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 }
 
-const cors = require("cors");
-
-app.use(
-  cors({
-    origin: "*",
-    methods: ["GET", "POST", "OPTIONS"],
-    allowedHeaders: ["Content-Type"],
-  })
-);
-
-// Handle preflight manually
-app.options("*", cors());
+app.use((req, res, next) => {
+  setCorsHeaders(res);
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+  next();
+});
 
 // Authentication disabled: middleware now permits all requests.
 async function authenticate(req, res, next) {
