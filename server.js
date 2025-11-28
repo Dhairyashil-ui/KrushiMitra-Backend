@@ -1,22 +1,43 @@
 // Load environment variables
 require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
 
-const express = require('express');
-const cookieParser = require('cookie-parser');
-let cors;
-try {
-  cors = require('cors');
-} catch (e) {
-  console.warn('cors package not found; using manual CORS headers. Install it with npm i cors for enhanced handling.');
-}
-const { connectToDatabase } = require('./db');
-const { logger, logDBOperation, logDBError } = require('./logger');
 const fs = require('fs');
 const path = require('path');
+
+// --- IMPORTANT: WRITE GOOGLE CREDENTIALS BEFORE LOADING TTS ----
+const keyFilePath = "/etc/gcp-key.json";
+
+if (process.env.GOOGLE_CREDENTIALS_JSON) {
+  console.log("Writing Google credentials file...");
+  try {
+    fs.writeFileSync(keyFilePath, process.env.GOOGLE_CREDENTIALS_JSON);
+    process.env.GOOGLE_APPLICATION_CREDENTIALS = keyFilePath;
+    console.log("GCP credentials ready at:", process.env.GOOGLE_APPLICATION_CREDENTIALS);
+  } catch (err) {
+    console.error("Failed to write GCP key file:", err);
+  }
+} else {
+  console.error("GOOGLE_CREDENTIALS_JSON is missing!");
+}
+
+// ---------------------------------------------------------------
+// Now load everything else (INCLUDING your TTS module)
+// ---------------------------------------------------------------
+
+const express = require('express');
+const cookieParser = require('cookie-parser');
+
+let cors;
+try { cors = require('cors'); } catch (e) { console.warn('cors missing'); }
+
+const { connectToDatabase } = require('./db');
+const { logger, logDBOperation, logDBError } = require('./logger');
 const crypto = require('crypto');
-const { generateSpeech } = require('./tts');
+
+const { generateSpeech } = require('./tts');   // <-- NOW SAFE TO LOAD!
 const sgMail = require('@sendgrid/mail');
 const { ObjectId } = require('mongodb');
+
 
 // Ensure the working directory is the backend folder even if started from project root
 // This prevents relative path lookups (e.g. accidental attempts to access `./health`) from resolving against the root.
