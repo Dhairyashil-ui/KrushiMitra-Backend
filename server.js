@@ -1852,10 +1852,7 @@ app.post('/ai/chat', authenticate, async (req, res) => {
       }
     }
     
-    const duration = Date.now() - startTime;|| userIdentifier
-        });
-      }
-    }
+
     
     const duration = Date.now() - startTime;
     logDBOperation('aiChat', { 
