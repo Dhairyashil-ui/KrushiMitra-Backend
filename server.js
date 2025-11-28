@@ -1831,9 +1831,6 @@ app.post('/ai/chat', authenticate, async (req, res) => {
       // Don't fail the whole request if we can't save to DB, just log the error
     }
 
-    try {
-      });
-    }
 
     // STEP 4: Save user question and AI response to UserContext.query
     if (contextUserId) {
