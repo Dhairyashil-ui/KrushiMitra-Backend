@@ -12,6 +12,7 @@ async function safelyCreateIndex(collection, keys, options) {
     console.warn(`UserContext index creation skipped: ${label}`, error.message);
   }
 }
+
 function normalizeObjectId(value) {
   if (!value) {
     return null;
@@ -91,11 +92,14 @@ function getCollection() {
 }
 
 async function initUserContextCollection(db) {
-  userContextCollection = db.collection(COLLECTION_NAME);
-  await userContextCollection.createIndex({ userId: 1 }, { unique: true });
-  await userContextCollection.createIndex({ 'location.updatedAt': -1 });
-  await userContextCollection.createIndex({ 'weather.updatedAt': -1 });
-  return userContextCollection;
+  const collection = db.collection(COLLECTION_NAME);
+  userContextCollection = collection;
+
+  await safelyCreateIndex(collection, { userId: 1 }, { unique: true, background: true });
+  await safelyCreateIndex(collection, { 'location.updatedAt': -1 }, { background: true });
+  await safelyCreateIndex(collection, { 'weather.updatedAt': -1 }, { background: true });
+
+  return collection;
 }
 
 async function ensureUserContext(userId, profile = {}) {
