@@ -1068,7 +1068,7 @@ app.post('/auth/verify-otp', async (req, res) => {
           ...(existingUser.profile || {}),
           ...(sanitizedPhone ? { phone: sanitizedPhone } : {}),
           ...(sanitizedName ? { name: sanitizedName } : {}),
-          ...(preferredLanguage ? { language: preferredLanguage } : {}),
+          ...(preferredLanguage ? { language: preferredLanguage } : {})
           ...(landSize ? { landSize: landSize?.toString() || '' } : {}),
           ...(soilType ? { soilType } : {})
         },
@@ -1624,22 +1624,6 @@ app.post('/ai/chat', authenticate, async (req, res) => {
     
     const memoryEntries = await getUserMemoryEntries(memoryKey, DEFAULT_MEMORY_SLICE);
 
-    // Generate farmer-friendly prompt for LLaMA 3
-    const promptContext = {
-      farmerProfile,
-      userProfile: userDoc
-        ? {
-            id: userDoc._id?.toString(),
-            email: userDoc.email,
-            phone: userDoc.phone,
-            preferredLanguage: userDoc.preferredLanguage || userDoc.profile?.language || null,
-            profile: userDoc.profile || {}
-          }
-        : null,
-      ...context,
-      memory: memoryEntries
-    };
-
     // In a real implementation, you would call the LLaMA 3 model with a prompt built from this context
     // For now, we'll simulate a farmer-friendly response
     let aiResponse = `Based on your query "${query}", I recommend checking the latest mandi prices for your crops and considering weather conditions in your area.`;
@@ -1684,7 +1668,7 @@ app.post('/ai/chat', authenticate, async (req, res) => {
         userId: memoryKey,
         query,
         response: aiResponse,
-        context: promptContext,
+        context: context || {},
         language: resolvedLanguage,
         timestamp: new Date()
       };
