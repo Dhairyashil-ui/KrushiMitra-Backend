@@ -89,28 +89,29 @@ async function runTests() {
     if (userContext && userContext.userId.equals(testUserId)) {
       success('UserContext document created successfully');
       
-      if (userContext.profile.name === profileData.name &&
-          userContext.profile.email === profileData.email &&
-          userContext.profile.phone === profileData.phone &&
-          userContext.profile.language === profileData.language) {
-        success('Profile data saved correctly');
-        info(`Profile: ${JSON.stringify(userContext.profile, null, 2)}`);
+      if (userContext.userData && 
+          userContext.userData.name === profileData.name &&
+          userContext.userData.email === profileData.email &&
+          userContext.userData.phone === profileData.phone &&
+          userContext.userData.language === profileData.language) {
+        success('User data saved correctly in userData section');
+        info(`User Data: ${JSON.stringify(userContext.userData, null, 2)}`);
       } else {
-        error('Profile data mismatch!');
+        error('User data mismatch!');
         console.log('Expected:', profileData);
-        console.log('Got:', userContext.profile);
+        console.log('Got:', userContext.userData);
       }
       
-      if (userContext.location === null && userContext.weather === null) {
-        success('Location and weather initialized as null');
+      if (userContext.userData.location === null && userContext.userData.weather === null) {
+        success('Location and weather initialized as null in userData');
       } else {
-        error('Location/weather should be null initially');
+        error('Location/weather should be null initially in userData');
       }
       
-      if (Array.isArray(userContext.chats) && userContext.chats.length === 0) {
-        success('Chats array initialized as empty');
+      if (Array.isArray(userContext.query) && userContext.query.length === 0) {
+        success('Query array initialized as empty');
       } else {
-        error('Chats should be an empty array initially');
+        error('Query should be an empty array initially');
       }
     } else {
       error('Failed to create UserContext document');
@@ -146,13 +147,13 @@ async function runTests() {
     
     userContext = await fetchUserContext(testUserId);
     
-    if (userContext.location && userContext.location.address === locationData.address) {
-      success('Location updated successfully');
-      info(`Location: ${userContext.location.address}`);
-      info(`Coordinates: (${userContext.location.latitude}, ${userContext.location.longitude})`);
+    if (userContext.userData && userContext.userData.location && userContext.userData.location.address === locationData.address) {
+      success('Location updated successfully in userData');
+      info(`Location: ${userContext.userData.location.address}`);
+      info(`Coordinates: (${userContext.userData.location.latitude}, ${userContext.userData.location.longitude})`);
       
-      if (userContext.location.latitude === locationData.lat &&
-          userContext.location.longitude === locationData.lon) {
+      if (userContext.userData.location.latitude === locationData.lat &&
+          userContext.userData.location.longitude === locationData.lon) {
         success('Coordinates saved correctly');
       } else {
         error('Coordinates mismatch');
@@ -161,13 +162,13 @@ async function runTests() {
       error('Location update failed');
     }
     
-    if (userContext.weather && userContext.weather.temperature === weatherData.temperature) {
-      success('Weather updated successfully');
-      info(`Weather: ${userContext.weather.condition}, ${userContext.weather.temperature}°C`);
-      info(`Humidity: ${userContext.weather.humidity}%, Wind: ${userContext.weather.windSpeed} km/h`);
+    if (userContext.userData && userContext.userData.weather && userContext.userData.weather.temperature === weatherData.temperature) {
+      success('Weather updated successfully in userData');
+      info(`Weather: ${userContext.userData.weather.condition}, ${userContext.userData.weather.temperature}°C`);
+      info(`Humidity: ${userContext.userData.weather.humidity}%, Wind: ${userContext.userData.weather.windSpeed} km/h`);
       
-      if (userContext.weather.humidity === weatherData.humidity &&
-          userContext.weather.condition === weatherData.condition) {
+      if (userContext.userData.weather.humidity === weatherData.humidity &&
+          userContext.userData.weather.condition === weatherData.condition) {
         success('Weather details saved correctly');
       } else {
         error('Weather details mismatch');
@@ -189,11 +190,11 @@ async function runTests() {
     
     userContext = await fetchUserContext(testUserId);
     
-    if (userContext.chats.length === 2) {
-      success('First conversation (2 messages) appended successfully');
-      info(`Chat count: ${userContext.chats.length}`);
+    if (userContext.query.length === 2) {
+      success('First conversation (2 messages) appended successfully to query');
+      info(`Query count: ${userContext.query.length}`);
     } else {
-      error(`Expected 2 messages, got ${userContext.chats.length}`);
+      error(`Expected 2 messages in query, got ${userContext.query.length}`);
     }
     
     // Add second conversation
@@ -204,11 +205,11 @@ async function runTests() {
     
     userContext = await fetchUserContext(testUserId);
     
-    if (userContext.chats.length === 4) {
-      success('Second conversation (2 more messages) appended successfully');
-      info(`Chat count: ${userContext.chats.length}`);
+    if (userContext.query.length === 4) {
+      success('Second conversation (2 more messages) appended successfully to query');
+      info(`Query count: ${userContext.query.length}`);
     } else {
-      error(`Expected 4 messages, got ${userContext.chats.length}`);
+      error(`Expected 4 messages in query, got ${userContext.query.length}`);
     }
     
     // Test 4: Only last 5 messages are kept
@@ -224,23 +225,23 @@ async function runTests() {
     
     userContext = await fetchUserContext(testUserId);
     
-    if (userContext.chats.length === 5) {
-      success('Chat history limited to last 5 messages (old messages removed)');
-      info(`Chat count: ${userContext.chats.length}`);
+    if (userContext.query.length === 5) {
+      success('Query history limited to last 5 messages (old messages removed)');
+      info(`Query count: ${userContext.query.length}`);
       
       // Verify first message is NOT the very first one we sent
-      const firstMessage = userContext.chats[0].message;
+      const firstMessage = userContext.query[0].message;
       if (firstMessage !== 'मेरी गेहूं की फसल में पीले पत्ते आ रहे हैं') {
-        success('Oldest message was correctly removed');
-        info('Current chat history (last 5):');
-        userContext.chats.forEach((chat, idx) => {
+        success('Oldest message was correctly removed from query');
+        info('Current query history (last 5):');
+        userContext.query.forEach((chat, idx) => {
           info(`  ${idx + 1}. [${chat.role}]: ${chat.message.substring(0, 50)}...`);
         });
       } else {
-        error('Oldest message should have been removed');
+        error('Oldest message should have been removed from query');
       }
     } else {
-      error(`Expected 5 messages, got ${userContext.chats.length}`);
+      error(`Expected 5 messages in query, got ${userContext.query.length}`);
     }
     
     // Add one more to verify it keeps working
@@ -251,14 +252,14 @@ async function runTests() {
     
     userContext = await fetchUserContext(testUserId);
     
-    if (userContext.chats.length === 5) {
-      success('Still maintaining 5 messages after additional conversation');
-      info('Latest chat history:');
-      userContext.chats.forEach((chat, idx) => {
+    if (userContext.query.length === 5) {
+      success('Still maintaining 5 messages in query after additional conversation');
+      info('Latest query history:');
+      userContext.query.forEach((chat, idx) => {
         info(`  ${idx + 1}. [${chat.role}]: ${chat.message.substring(0, 50)}...`);
       });
     } else {
-      error(`Expected 5 messages, got ${userContext.chats.length}`);
+      error(`Expected 5 messages in query, got ${userContext.query.length}`);
     }
     
     // Final Summary
@@ -271,11 +272,9 @@ async function runTests() {
     log('\nFinal UserContext Document:', 'bright');
     console.log(JSON.stringify({
       userId: finalContext.userId.toString(),
-      profile: finalContext.profile,
-      location: finalContext.location,
-      weather: finalContext.weather,
-      chatCount: finalContext.chats.length,
-      latestChats: finalContext.chats.slice(-2).map(c => ({
+      userData: finalContext.userData,
+      queryCount: finalContext.query.length,
+      latestQueries: finalContext.query.slice(-2).map(c => ({
         role: c.role,
         message: c.message.substring(0, 40) + '...'
       }))
