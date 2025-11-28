@@ -1,12 +1,12 @@
 "use strict";
 
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 const textToSpeech = require("@google-cloud/text-to-speech");
 
-const GOOGLE_CREDENTIALS_JSON = process.env.GOOGLE_CREDENTIALS_JSON;
-const GOOGLE_CREDENTIALS_FILE =
-	process.env.GOOGLE_CREDENTIALS_FILE || path.resolve(process.cwd(), "gcp-key.json");
+const RAW_GOOGLE_CREDENTIALS = process.env.GOOGLE_CREDENTIALS_JSON;
+const DEFAULT_CREDENTIAL_FILENAME = process.env.GOOGLE_CREDENTIALS_FILENAME || "gcp-key.json";
 
 const LANGUAGE_ALIASES = {
 	hi: "hi",
@@ -56,6 +56,64 @@ const audioEncoding = process.env.GOOGLE_TTS_AUDIO_ENCODING || "MP3";
 let credentialsReadyPromise;
 let ttsClientPromise;
 
+function normalizeCredentialsString(rawValue) {
+	if (!rawValue || typeof rawValue !== "string") {
+		return null;
+	}
+	const trimmed = rawValue.trim();
+	const attempts = [trimmed];
+	if (!trimmed.startsWith("{")) {
+		try {
+			attempts.push(Buffer.from(trimmed, "base64").toString("utf8"));
+		} catch (error) {
+			console.warn("GOOGLE_CREDENTIALS_JSON base64 decode failed, falling back to raw string", {
+				error: error.message,
+			});
+		}
+	}
+	for (const candidate of attempts) {
+		try {
+			JSON.parse(candidate);
+			return candidate;
+		} catch (error) {
+			continue;
+		}
+	}
+	throw new Error("GOOGLE_CREDENTIALS_JSON is not valid JSON or base64-encoded JSON");
+}
+
+const GOOGLE_CREDENTIALS_JSON = normalizeCredentialsString(RAW_GOOGLE_CREDENTIALS);
+
+function resolveCredentialPathCandidates() {
+	const candidates = [];
+	if (process.env.GOOGLE_CREDENTIALS_FILE) {
+		candidates.push(path.resolve(process.env.GOOGLE_CREDENTIALS_FILE));
+	}
+	candidates.push(path.resolve(process.cwd(), DEFAULT_CREDENTIAL_FILENAME));
+	candidates.push(path.join(os.tmpdir(), DEFAULT_CREDENTIAL_FILENAME));
+	return [...new Set(candidates)];
+}
+
+async function writeCredentialsFile(preferredPaths, jsonContent) {
+	let lastError;
+	for (const candidate of preferredPaths) {
+		try {
+			await fs.promises.mkdir(path.dirname(candidate), { recursive: true });
+			await fs.promises.writeFile(candidate, jsonContent, {
+				encoding: "utf8",
+				mode: 0o600,
+			});
+			return candidate;
+		} catch (error) {
+			lastError = error;
+			console.warn(`Failed to write GOOGLE_CREDENTIALS_JSON to ${candidate}: ${error.message}`);
+			continue;
+		}
+	}
+	const reason = lastError ? lastError.message : "No writable credential paths available";
+	throw new Error(`Unable to persist GOOGLE_CREDENTIALS_JSON (${reason})`);
+}
+
 function sanitizeFloat(value, fallback) {
 	if (value === undefined || value === null || value === "") return fallback;
 	const parsed = Number.parseFloat(value);
@@ -90,22 +148,18 @@ async function ensureGoogleCredentialsFile() {
 	}
 
 	if (!GOOGLE_CREDENTIALS_JSON) {
+		console.warn(
+			"GOOGLE_CREDENTIALS_JSON not provided. Falling back to default Google ADC chain (gcloud auth, metadata server, etc.)."
+		);
 		return null; // fall back to other ADC providers (gcloud, metadata server, etc.)
 	}
 
 	if (!credentialsReadyPromise) {
 		credentialsReadyPromise = (async () => {
-			try {
-				JSON.parse(GOOGLE_CREDENTIALS_JSON);
-			} catch (error) {
-				throw new Error(`GOOGLE_CREDENTIALS_JSON is not valid JSON: ${error.message}`);
-			}
-			const targetPath = GOOGLE_CREDENTIALS_FILE;
-			await fs.promises.mkdir(path.dirname(targetPath), { recursive: true });
-			await fs.promises.writeFile(targetPath, GOOGLE_CREDENTIALS_JSON, {
-				encoding: "utf8",
-				mode: 0o600,
-			});
+			const targetPath = await writeCredentialsFile(
+				resolveCredentialPathCandidates(),
+				GOOGLE_CREDENTIALS_JSON
+			);
 			process.env.GOOGLE_APPLICATION_CREDENTIALS = targetPath;
 			return targetPath;
 		})().catch((error) => {
@@ -186,7 +240,15 @@ async function generateSpeech(text, lang = "hi") {
 		throw new Error("generateSpeech: text is empty after trimming");
 	}
 
-	const client = await getTtsClient();
+	let client;
+	try {
+		client = await getTtsClient();
+	} catch (error) {
+		console.error("Google Cloud TTS client initialization failed", { error: error.message });
+		throw new Error(
+			"Google Cloud TTS credentials are not configured. Set GOOGLE_CREDENTIALS_JSON or GOOGLE_APPLICATION_CREDENTIALS."
+		);
+	}
 	const normalizedLang = normalizeLanguage(lang);
 	const voice = resolveVoice(normalizedLang);
 	const audioConfig = buildAudioConfig();
@@ -200,8 +262,16 @@ async function generateSpeech(text, lang = "hi") {
 	for (let i = 0; i < chunks.length; i += 1) {
 		const chunk = chunks[i];
 		console.log(`🔊 [GCP TTS] chunk ${i + 1}/${chunks.length} (${chunk.length} chars)`);
-		const buffer = await synthesizeChunk(client, chunk, voice, audioConfig);
-		audioBuffers.push(buffer);
+		try {
+			const buffer = await synthesizeChunk(client, chunk, voice, audioConfig);
+			audioBuffers.push(buffer);
+		} catch (error) {
+			console.error("Google Cloud TTS synthesis failed", {
+				chunk: i + 1,
+				error: error.message,
+			});
+			throw error;
+		}
 	}
 
 	return Buffer.concat(audioBuffers);
