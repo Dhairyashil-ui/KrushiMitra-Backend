@@ -85,12 +85,13 @@ function normalizeCredentialsString(rawValue) {
 const GOOGLE_CREDENTIALS_JSON = normalizeCredentialsString(RAW_GOOGLE_CREDENTIALS);
 
 function resolveCredentialPathCandidates() {
-	const candidates = [];
+	const candidates = [
+		path.resolve(process.cwd(), DEFAULT_CREDENTIAL_FILENAME),
+		path.join(os.tmpdir(), DEFAULT_CREDENTIAL_FILENAME),
+	];
 	if (process.env.GOOGLE_CREDENTIALS_FILE) {
 		candidates.push(path.resolve(process.env.GOOGLE_CREDENTIALS_FILE));
 	}
-	candidates.push(path.resolve(process.cwd(), DEFAULT_CREDENTIAL_FILENAME));
-	candidates.push(path.join(os.tmpdir(), DEFAULT_CREDENTIAL_FILENAME));
 	return [...new Set(candidates)];
 }
 
@@ -295,4 +296,3 @@ if (require.main === module) {
 		}
 	})();
 }
-
