@@ -14,23 +14,16 @@ const { logger, logDBOperation, logDBError } = require('./logger');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const gcpCredentialPath = path.join(process.cwd(), process.env.GOOGLE_CREDENTIALS_FILENAME || 'gcp-key.json');
-
-if (process.env.GOOGLE_CREDENTIALS_JSON) {
-  try {
-    fs.writeFileSync(gcpCredentialPath, process.env.GOOGLE_CREDENTIALS_JSON, { encoding: 'utf8', mode: 0o600 });
-    process.env.GOOGLE_APPLICATION_CREDENTIALS = gcpCredentialPath;
-    console.log('[TTS] Google credentials prepared at', gcpCredentialPath);
-  } catch (error) {
-    console.error('[TTS] Failed to persist Google credentials file', error);
-  }
-} else {
-  console.warn('[TTS] GOOGLE_CREDENTIALS_JSON not provided; relying on default ADC chain');
-}
-
 const { generateSpeech } = require('./tts');
 const sgMail = require('@sendgrid/mail');
 const { ObjectId } = require('mongodb');
+const {
+  initUserContextCollection,
+  ensureUserContext,
+  updateLocationAndWeather,
+  appendChatMessage,
+  fetchUserContext
+} = require('./user-context');
 
 // Ensure the working directory is the backend folder even if started from project root
 // This prevents relative path lookups (e.g. accidental attempts to access `./health`) from resolving against the root.
@@ -93,6 +86,7 @@ let weatherDataCollection;
 let sessionsCollection;
 let userMemoriesCollection;
 let otpCollection;
+let userContextCollection;
 
 const DEFAULT_MEMORY_SLICE = Number(process.env.AI_MEMORY_SLICE || 10);
 const MAX_MEMORY_ENTRIES = Number(process.env.AI_MEMORY_LIMIT || 200);
@@ -150,6 +144,7 @@ async function initializeCollections() {
     weatherDataCollection = db.collection('weather_data');
     userMemoriesCollection = db.collection('user_memories');
     otpCollection = db.collection('otp_codes');
+    userContextCollection = await initUserContextCollection(db);
 
     await userMemoriesCollection.createIndex({ userKey: 1 }, { unique: true });
     await aiinteractionsCollection.createIndex({ userId: 1, timestamp: -1 });
@@ -160,7 +155,7 @@ async function initializeCollections() {
     logDBOperation('initializeCollections', { 
       durationMs: duration,
       status: 'success',
-      collections: ['farmers', 'activities', 'mandiprices', 'aiinteractions', 'weather_data', 'sessions', 'user_memories', 'otp_codes']
+      collections: ['farmers', 'activities', 'mandiprices', 'aiinteractions', 'weather_data', 'sessions', 'user_memories', 'otp_codes', 'user_context']
     });
     
     logger.info('Database collections initialized', { durationMs: duration });
@@ -441,6 +436,20 @@ function formatUserResponse(user) {
   };
 }
 
+function formatUserContextResponse(doc) {
+  if (!doc) {
+    return null;
+  }
+  const normalizedUserId = doc.userId instanceof ObjectId ? doc.userId.toString() : doc.userId;
+  return {
+    userId: normalizedUserId,
+    profile: doc.profile || {},
+    location: doc.location || null,
+    weather: doc.weather || null,
+    chats: doc.chats || []
+  };
+}
+
 // Helper function to verify Firebase token (mock implementation)
 async function verifyFirebaseToken(idToken) {
   // In a real implementation, this would call Firebase Admin SDK
@@ -698,6 +707,13 @@ app.post('/auth/google', async (req, res) => {
         lastLogin: now
       };
 
+      await ensureUserContext(existingUser._id, {
+        name: existingUser.name,
+        email,
+        phone: existingUser.phone || null,
+        language: existingUser.preferredLanguage || existingUser.profile?.language || null
+      });
+
       const session = await createSession(existingUser._id, req);
       setSessionCookie(res, session.token, session.expiresAt);
       
@@ -729,6 +745,13 @@ app.post('/auth/google', async (req, res) => {
     
     const result = await usersCollection.insertOne(newUser);
     newUser._id = result.insertedId;
+
+    await ensureUserContext(result.insertedId, {
+      name: newUser.name,
+      email: newUser.email,
+      phone: newUser.phone || null,
+      language: newUser.profile?.language || newUser.preferredLanguage || null
+    });
 
     const session = await createSession(result.insertedId, req);
     setSessionCookie(res, session.token, session.expiresAt);
@@ -814,6 +837,53 @@ app.put('/auth/user/:userId', async (req, res) => {
     logger.error('Error updating user profile', { error: error.message });
     res.status(500).json({
       error: { code: 'SERVER_ERROR', message: 'Error updating profile' }
+    });
+  }
+});
+
+app.get('/user-context/:userId', authenticate, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const contextDoc = await fetchUserContext(userId);
+    if (!contextDoc) {
+      return res.status(404).json({
+        error: { code: 'USER_CONTEXT_NOT_FOUND', message: 'User context not found' }
+      });
+    }
+    return res.json({
+      status: 'success',
+      data: formatUserContextResponse(contextDoc)
+    });
+  } catch (error) {
+    logger.error('Error fetching user context', { error: error.message });
+    res.status(500).json({
+      error: { code: 'SERVER_ERROR', message: 'Error fetching user context' }
+    });
+  }
+});
+
+app.put('/user-context/home', authenticate, async (req, res) => {
+  try {
+    const { userId, location, weather, profile } = req.body || {};
+    if (!userId) {
+      return res.status(400).json({
+        error: { code: 'VALIDATION_ERROR', message: 'userId is required' }
+      });
+    }
+    const updatedDoc = await updateLocationAndWeather(userId, { profile, location, weather });
+    if (!updatedDoc) {
+      return res.status(404).json({
+        error: { code: 'USER_CONTEXT_NOT_FOUND', message: 'User context not found' }
+      });
+    }
+    return res.json({
+      status: 'success',
+      data: formatUserContextResponse(updatedDoc)
+    });
+  } catch (error) {
+    logger.error('Error updating home context', { error: error.message });
+    res.status(500).json({
+      error: { code: 'SERVER_ERROR', message: 'Error updating user context' }
     });
   }
 });
@@ -1089,6 +1159,13 @@ app.post('/auth/verify-otp', async (req, res) => {
         preferredLanguage: preferredLanguage || existingUser.preferredLanguage || existingUser.profile?.language
       };
 
+      await ensureUserContext(existingUser._id, {
+        name: existingUser.name || sanitizedName || email.split('@')[0],
+        email,
+        phone: sanitizedPhone || existingUser.phone || null,
+        language: existingUser.preferredLanguage || preferredLanguage || existingUser.profile?.language || null
+      });
+
       await ensureUserMemoryDocument(existingUser._id?.toString() || email);
 
       const session = await createSession(existingUser._id, req);
@@ -1135,6 +1212,13 @@ app.post('/auth/verify-otp', async (req, res) => {
       
       const result = await usersCollection.insertOne(newUser);
       newUser._id = result.insertedId;
+
+      await ensureUserContext(result.insertedId, {
+        name: newUser.name,
+        email: newUser.email,
+        phone: newUser.phone || null,
+        language: newUser.profile?.language || newUser.preferredLanguage || null
+      });
 
       await ensureUserMemoryDocument(newUser._id.toString());
 
@@ -1612,10 +1696,29 @@ app.post('/ai/chat', authenticate, async (req, res) => {
     }
 
     const memoryKey = normalizeUserKey(userDoc?._id, userIdentifier);
+    const contextUserId = userDoc?._id || toObjectId(userIdentifier);
+
+    let userContextPayload = null;
+    if (contextUserId) {
+      try {
+        const contextDoc = await fetchUserContext(contextUserId);
+        userContextPayload = formatUserContextResponse(contextDoc);
+      } catch (contextError) {
+        logger.warn('Failed to fetch user context for AI chat', {
+          error: contextError.message,
+          userId: contextUserId?.toString() || userIdentifier
+        });
+      }
+    }
 
     const resolvedLanguage = requestedLanguage && typeof requestedLanguage === 'string' && requestedLanguage.trim().length > 0
       ? requestedLanguage.trim()
       : (userDoc?.preferredLanguage || userDoc?.profile?.language || 'en');
+
+    const aiContextPayload = {
+      ...(context || {}),
+      userContext: userContextPayload
+    };
 
     // Get farmer profile for context
     let farmerProfile = null;
@@ -1682,7 +1785,7 @@ app.post('/ai/chat', authenticate, async (req, res) => {
         userId: memoryKey,
         query,
         response: aiResponse,
-        context: context || {},
+        context: aiContextPayload,
         language: resolvedLanguage,
         timestamp: new Date()
       };
@@ -1704,6 +1807,20 @@ app.post('/ai/chat', authenticate, async (req, res) => {
         error: memoryError.message,
         userIdentifier
       });
+    }
+
+    if (contextUserId) {
+      try {
+        await appendChatMessage(contextUserId, [
+          { role: 'user', message: query },
+          { role: 'assistant', message: aiResponse }
+        ]);
+      } catch (contextAppendError) {
+        logger.warn('Failed to update UserContext chat history', {
+          error: contextAppendError.message,
+          userId: contextUserId?.toString() || userIdentifier
+        });
+      }
     }
     
     const duration = Date.now() - startTime;
@@ -1727,7 +1844,8 @@ app.post('/ai/chat', authenticate, async (req, res) => {
         automations,
         relatedData,
         memory: latestMemory,
-        language: resolvedLanguage
+        language: resolvedLanguage,
+        userContext: userContextPayload
       }
     });
   } catch (error) {
