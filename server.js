@@ -1768,11 +1768,48 @@ app.post('/ai/chat', authenticate, async (req, res) => {
     const memoryEntries = await getUserMemoryEntries(memoryKey, DEFAULT_MEMORY_SLICE);
 
     // STEP 3: Generate AI response with full context
-    // In production, this would call your LLM (LLaMA, Mistral, etc.) with:
-    // - userContextPayload.userData (profile, location, weather)
-    // - userContextPayload.query (last 5 conversations)
-    // - query (current user question)
+    // Build structured prompt with user data + last 5 conversations + current query
+    const userData = userContextPayload?.userData || {};
+    const lastConversations = userContextPayload?.query || [];
     
+    // Format the LLM prompt with all user context
+    const llmPrompt = {
+      query: query,
+      user_data: {
+        user_name: userData.name || 'Unknown',
+        user_email: userData.email || 'Not provided',
+        user_phone: userData.phone || 'Not provided',
+        user_language: userData.language || resolvedLanguage,
+        user_location: userData.location ? {
+          address: userData.location.address,
+          latitude: userData.location.latitude,
+          longitude: userData.location.longitude
+        } : null,
+        user_weather: userData.weather ? {
+          temperature: userData.weather.temperature,
+          humidity: userData.weather.humidity,
+          condition: userData.weather.condition
+        } : null
+      },
+      last_5_conversations: lastConversations.map(conv => ({
+        role: conv.role,
+        message: conv.message
+      })),
+      farmer_profile: farmerProfile ? {
+        phone: farmerProfile.phone,
+        crops: farmerProfile.crops,
+        land_size: farmerProfile.landSize
+      } : null
+    };
+    
+    // Log the exact prompt that LLM will receive
+    logger.info('LLM Prompt Generated', {
+      userId: contextUserId?.toString(),
+      prompt: JSON.stringify(llmPrompt, null, 2)
+    });
+    
+    // TODO: Replace this mock response with actual LLM API call
+    // Example: const aiResponse = await callLLM(llmPrompt);
     // For now, we'll simulate a farmer-friendly response
     let aiResponse = `Based on your query "${query}", I recommend checking the latest mandi prices for your crops and considering weather conditions in your area.`;
     
@@ -1831,10 +1868,15 @@ app.post('/ai/chat', authenticate, async (req, res) => {
       // Don't fail the whole request if we can't save to DB, just log the error
     }
 
-
     // STEP 4: Save user question and AI response to UserContext.query
     if (contextUserId) {
       try {
+        logger.info('Attempting to save conversation to UserContext', {
+          userId: contextUserId?.toString(),
+          queryLength: query?.length,
+          responseLength: aiResponse?.length
+        });
+        
         await appendChatMessage(contextUserId, [
           { role: 'user', message: query },        // Save user question
           { role: 'assistant', message: aiResponse } // Save AI response
@@ -1845,14 +1887,18 @@ app.post('/ai/chat', authenticate, async (req, res) => {
           messagesSaved: 2
         });
       } catch (contextAppendError) {
-        logger.warn('Failed to update UserContext query array', {
+        logger.error('Failed to update UserContext query array', {
           error: contextAppendError.message,
+          stack: contextAppendError.stack,
           userId: contextUserId?.toString() || userIdentifier
         });
       }
+    } else {
+      logger.warn('No contextUserId available, skipping UserContext update', {
+        userIdentifier,
+        hasUserDoc: !!userDoc
+      });
     }
-    
-
     
     const duration = Date.now() - startTime;
     logDBOperation('aiChat', { 
