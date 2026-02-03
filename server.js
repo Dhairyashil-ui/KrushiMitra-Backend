@@ -135,7 +135,7 @@ async function initializeCollections() {
   try {
     const client = await connectToDatabase('admin');
     const db = client.db("KrushiMitraDB");
-    
+
     farmersCollection = db.collection('farmers');
     activitiesCollection = db.collection('activities');
     mandipricesCollection = db.collection('mandiprices');
@@ -151,19 +151,19 @@ async function initializeCollections() {
     await aiinteractionsCollection.createIndex({ userId: 1, timestamp: -1 });
     await otpCollection.createIndex({ email: 1 }, { unique: true });
     await otpCollection.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 });
-    
+
     const duration = Date.now() - startTime;
-    logDBOperation('initializeCollections', { 
+    logDBOperation('initializeCollections', {
       durationMs: duration,
       status: 'success',
       collections: ['farmers', 'activities', 'mandiprices', 'aiinteractions', 'weather_data', 'sessions', 'user_memories', 'otp_codes', 'user_context']
     });
-    
+
     logger.info('Database collections initialized', { durationMs: duration });
   } catch (error) {
     const duration = Date.now() - startTime;
     logDBError('initializeCollections', error, { durationMs: duration });
-    logger.error('Error initializing database collections', { 
+    logger.error('Error initializing database collections', {
       error: error.message,
       durationMs: duration
     });
@@ -474,8 +474,8 @@ app.get('/tts', async (req, res) => {
   try {
     const { text, lang = 'hi' } = req.query; // default to Hindi
     if (!text) {
-      return res.status(400).json({ 
-        error: { code: 'VALIDATION_ERROR', message: 'text query parameter is required' } 
+      return res.status(400).json({
+        error: { code: 'VALIDATION_ERROR', message: 'text query parameter is required' }
       });
     }
 
@@ -483,8 +483,8 @@ app.get('/tts', async (req, res) => {
     const saved = await generateSpeech(text, lang, { outputFile: tmpPath });
 
     if (!fs.existsSync(saved)) {
-      return res.status(500).json({ 
-        error: { code: 'TTS_ERROR', message: 'Speech file not found after generation' } 
+      return res.status(500).json({
+        error: { code: 'TTS_ERROR', message: 'Speech file not found after generation' }
       });
     }
 
@@ -498,12 +498,12 @@ app.get('/tts', async (req, res) => {
     const stream = fs.createReadStream(saved);
     stream.pipe(res);
     stream.on('close', () => {
-      fs.promises.unlink(saved).catch(() => {}); // cleanup temp file
+      fs.promises.unlink(saved).catch(() => { }); // cleanup temp file
     });
   } catch (error) {
     logger.error('TTS generation failed', { error: error.message });
-    res.status(500).json({ 
-      error: { code: 'TTS_ERROR', message: 'Failed to generate speech' } 
+    res.status(500).json({
+      error: { code: 'TTS_ERROR', message: 'Failed to generate speech' }
     });
   }
 });
@@ -515,16 +515,16 @@ app.post('/farmers', authenticate, async (req, res) => {
   const startTime = Date.now();
   try {
     const { name, phone, language, location, crops, landSize, soilType } = req.body;
-    
+
     // Validation
     if (!name || !phone) {
       const duration = Date.now() - startTime;
-      logger.warn('Farmer profile validation failed - missing required fields', { 
+      logger.warn('Farmer profile validation failed - missing required fields', {
         farmerId: req.body.phone,
         missingFields: [!name ? 'name' : null, !phone ? 'phone' : null].filter(Boolean),
         durationMs: duration
       });
-      
+
       return res.status(400).json({
         error: {
           code: 'VALIDATION_ERROR',
@@ -532,9 +532,9 @@ app.post('/farmers', authenticate, async (req, res) => {
         }
       });
     }
-    
+
     const now = new Date();
-    
+
     // Use MongoDB to find or create farmer
     const farmer = await farmersCollection.findOneAndUpdate(
       { phone: phone },
@@ -557,35 +557,35 @@ app.post('/farmers', authenticate, async (req, res) => {
         returnDocument: 'after'
       }
     );
-    
+
     const duration = Date.now() - startTime;
-    logDBOperation('upsertFarmer', { 
+    logDBOperation('upsertFarmer', {
       farmerId: phone,
       durationMs: duration,
       status: 'success'
     });
-    
-    logger.info('Farmer profile created/updated successfully', { 
+
+    logger.info('Farmer profile created/updated successfully', {
       farmerId: phone,
       durationMs: duration
     });
-    
+
     res.status(200).json({
       status: 'success',
       data: farmer
     });
   } catch (error) {
     const duration = Date.now() - startTime;
-    logDBError('upsertFarmer', error, { 
+    logDBError('upsertFarmer', error, {
       farmerId: req.body?.phone,
       durationMs: duration
     });
-    logger.error('Error creating/updating farmer profile', { 
+    logger.error('Error creating/updating farmer profile', {
       error: error.message,
       farmerId: req.body?.phone,
       durationMs: duration
     });
-    
+
     res.status(500).json({
       error: {
         code: 'SERVER_ERROR',
@@ -600,35 +600,35 @@ app.get('/farmers/:phone', authenticate, async (req, res) => {
   const startTime = Date.now();
   try {
     const { phone } = req.params;
-    
+
     // Use MongoDB to find farmer
     const farmer = await farmersCollection.findOne({ phone: phone });
-    
+
     const duration = Date.now() - startTime;
     if (farmer) {
-      logDBOperation('findFarmer', { 
+      logDBOperation('findFarmer', {
         farmerId: phone,
         durationMs: duration,
         status: 'success'
       });
-      
-      logger.info('Farmer profile retrieved successfully', { 
+
+      logger.info('Farmer profile retrieved successfully', {
         farmerId: phone,
         durationMs: duration
       });
     } else {
-      logDBOperation('findFarmer', { 
+      logDBOperation('findFarmer', {
         farmerId: phone,
         durationMs: duration,
         status: 'not_found'
       });
-      
-      logger.warn('Farmer not found', { 
+
+      logger.warn('Farmer not found', {
         farmerId: phone,
         durationMs: duration
       });
     }
-    
+
     if (!farmer) {
       return res.status(404).json({
         error: {
@@ -637,23 +637,23 @@ app.get('/farmers/:phone', authenticate, async (req, res) => {
         }
       });
     }
-    
+
     res.status(200).json({
       status: 'success',
       data: farmer
     });
   } catch (error) {
     const duration = Date.now() - startTime;
-    logDBError('findFarmer', error, { 
+    logDBError('findFarmer', error, {
       farmerId: req.params?.phone,
       durationMs: duration
     });
-    logger.error('Error fetching farmer profile', { 
+    logger.error('Error fetching farmer profile', {
       error: error.message,
       farmerId: req.params?.phone,
       durationMs: duration
     });
-    
+
     res.status(500).json({
       error: {
         code: 'SERVER_ERROR',
@@ -672,7 +672,7 @@ app.post('/auth/google', async (req, res) => {
   const startTime = Date.now();
   try {
     const { idToken, user } = req.body;
-    
+
     if (!idToken || !user || !user.email) {
       return res.status(400).json({
         error: { code: 'VALIDATION_ERROR', message: 'ID token and user email are required' }
@@ -681,22 +681,22 @@ app.post('/auth/google', async (req, res) => {
 
     // In production, verify the idToken with Google
     // For now, we'll trust the client-side verification
-    
+
     const { email, name, photo, id: googleId } = user;
     const now = new Date();
-    
+
     // Check if user exists
     let existingUser = await usersCollection.findOne({ email });
-    
+
     if (existingUser) {
       await usersCollection.updateOne(
         { email },
-        { 
-          $set: { 
+        {
+          $set: {
             lastLogin: now,
             name,
             photo
-          } 
+          }
         }
       );
       existingUser = {
@@ -715,9 +715,9 @@ app.post('/auth/google', async (req, res) => {
 
       const session = await createSession(existingUser._id, req);
       setSessionCookie(res, session.token, session.expiresAt);
-      
+
       logger.info('User logged in via Google', { userId: existingUser._id.toString(), email });
-      
+
       return res.json({
         status: 'success',
         data: {
@@ -730,7 +730,7 @@ app.post('/auth/google', async (req, res) => {
         }
       });
     }
-    
+
     // Create new user
     const newUser = {
       googleId,
@@ -741,7 +741,7 @@ app.post('/auth/google', async (req, res) => {
       lastLogin: now,
       profile: {}
     };
-    
+
     const result = await usersCollection.insertOne(newUser);
     newUser._id = result.insertedId;
 
@@ -754,14 +754,14 @@ app.post('/auth/google', async (req, res) => {
 
     const session = await createSession(result.insertedId, req);
     setSessionCookie(res, session.token, session.expiresAt);
-    
+
     const duration = Date.now() - startTime;
-    logger.info('New user registered via Google', { 
+    logger.info('New user registered via Google', {
       userId: result.insertedId.toString(),
       email,
       durationMs: duration
     });
-    
+
     res.status(201).json({
       status: 'success',
       data: {
@@ -787,15 +787,15 @@ app.get('/auth/user/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
     const { ObjectId } = require('mongodb');
-    
+
     const user = await usersCollection.findOne({ _id: new ObjectId(userId) });
-    
+
     if (!user) {
       return res.status(404).json({
         error: { code: 'NOT_FOUND', message: 'User not found' }
       });
     }
-    
+
     res.json({
       status: 'success',
       data: {
@@ -825,12 +825,12 @@ app.put('/auth/user/:userId', async (req, res) => {
     const { userId } = req.params;
     const { profile } = req.body;
     const { ObjectId } = require('mongodb');
-    
+
     await usersCollection.updateOne(
       { _id: new ObjectId(userId) },
       { $set: { profile, updatedAt: new Date() } }
     );
-    
+
     res.json({ status: 'success', message: 'Profile updated' });
   } catch (error) {
     logger.error('Error updating user profile', { error: error.message });
@@ -871,7 +871,7 @@ app.put('/user-context/home', authenticate, async (req, res) => {
         error: { code: 'VALIDATION_ERROR', message: 'userId is required' }
       });
     }
-    
+
     // Updates only userData.location and userData.weather, preserves query
     const updatedDoc = await updateLocationAndWeather(userId, { profile, location, weather });
     if (!updatedDoc) {
@@ -989,13 +989,13 @@ app.post('/auth/send-otp', async (req, res) => {
     console.log('SENDGRID_API_KEY:', process.env.SENDGRID_API_KEY ? 'OK' : 'MISSING');
     console.log('SENDGRID_FROM:', process.env.SENDGRID_FROM);
     const { email } = req.body;
-    
+
     if (!email || !email.includes('@')) {
       return res.status(400).json({
         error: { code: 'VALIDATION_ERROR', message: 'Valid email is required' }
       });
     }
-    
+
     // Check SendGrid configuration
     if (!SENDGRID_API_KEY || !SENDGRID_FROM) {
       logger.error('Email service not configured', {
@@ -1009,23 +1009,23 @@ app.post('/auth/send-otp', async (req, res) => {
         }
       });
     }
-    
+
     // Generate 6-digit OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    
+
     // Persist OTP with expiration
     await persistOtpRecord(email, otp);
-    
+
     // Send OTP email via SendGrid
     await sendOtpEmail(email, otp);
-    
+
     logger.info('OTP sent successfully', { email });
-    
+
     res.json({
       status: 'success',
       message: 'OTP sent to your email'
     });
-    
+
   } catch (error) {
     console.error('🔥 OTP ERROR:', error);
     logger.error('Error sending OTP', {
@@ -1034,8 +1034,8 @@ app.post('/auth/send-otp', async (req, res) => {
       code: error.code
     });
     res.status(500).json({
-      error: { 
-        code: 'SERVER_ERROR', 
+      error: {
+        code: 'SERVER_ERROR',
         message: 'Error sending OTP. Please try again.',
         details: process.env.NODE_ENV === 'development' ? error.message : undefined
       }
@@ -1050,13 +1050,13 @@ app.post('/auth/verify-otp', async (req, res) => {
     const sanitizedPhone = typeof phone === 'string' ? phone.trim() : '';
     const sanitizedName = typeof name === 'string' ? name.trim() : '';
     const preferredLanguage = typeof language === 'string' && language.trim().length > 0 ? language.trim() : null;
-    
+
     if (!email || !otp) {
       return res.status(400).json({
         error: { code: 'VALIDATION_ERROR', message: 'Email and OTP are required' }
       });
     }
-    
+
     // Check if OTP exists
     const otpRecord = await fetchOtpRecord(email);
 
@@ -1119,7 +1119,7 @@ app.post('/auth/verify-otp', async (req, res) => {
 
     // OTP verified - clear it
     await deleteOtpRecord(email);
-    
+
     // Check if user exists
     if (existingUser) {
       const now = new Date();
@@ -1180,9 +1180,9 @@ app.post('/auth/verify-otp', async (req, res) => {
 
       const session = await createSession(existingUser._id, req);
       setSessionCookie(res, session.token, session.expiresAt);
-      
+
       logger.info('User logged in via email OTP', { userId: existingUser._id.toString(), email });
-      
+
       return res.json({
         status: 'success',
         message: 'Login successful',
@@ -1219,7 +1219,7 @@ app.post('/auth/verify-otp', async (req, res) => {
         createdAt: now,
         lastLogin: now
       };
-      
+
       const result = await usersCollection.insertOne(newUser);
       newUser._id = result.insertedId;
 
@@ -1241,9 +1241,9 @@ app.post('/auth/verify-otp', async (req, res) => {
 
       const session = await createSession(result.insertedId, req);
       setSessionCookie(res, session.token, session.expiresAt);
-      
+
       logger.info('New user registered via email OTP', { userId: result.insertedId.toString(), email });
-      
+
       return res.json({
         status: 'success',
         message: 'Registration successful',
@@ -1255,7 +1255,7 @@ app.post('/auth/verify-otp', async (req, res) => {
         }
       });
     }
-    
+
   } catch (error) {
     logger.error('Error verifying OTP', { error: error.message });
     res.status(500).json({
@@ -1325,10 +1325,10 @@ app.post('/auth/logout', async (req, res) => {
 app.post('/auth/verify', async (req, res) => {
   try {
     const { idToken } = req.body;
-    
+
     if (!idToken) {
       logger.warn('Authentication failed - missing ID token');
-      
+
       return res.status(400).json({
         error: {
           code: 'VALIDATION_ERROR',
@@ -1336,11 +1336,11 @@ app.post('/auth/verify', async (req, res) => {
         }
       });
     }
-    
+
     const isValid = await verifyFirebaseToken(idToken);
     if (!isValid) {
       logger.warn('Authentication failed - invalid Firebase ID token');
-      
+
       return res.status(401).json({
         error: {
           code: 'INVALID_TOKEN',
@@ -1348,7 +1348,7 @@ app.post('/auth/verify', async (req, res) => {
         }
       });
     }
-    
+
     // For demo purposes, we'll create a mock farmer
     // In a real implementation, you'd extract user info from the token
     const mockFarmer = {
@@ -1362,9 +1362,9 @@ app.post('/auth/verify', async (req, res) => {
       joinedAt: new Date(),
       updatedAt: new Date()
     };
-    
+
     logger.info('User authenticated successfully', { farmerId: mockFarmer.phone });
-    
+
     res.status(200).json({
       status: 'success',
       data: {
@@ -1374,7 +1374,7 @@ app.post('/auth/verify', async (req, res) => {
     });
   } catch (error) {
     logger.error('Error verifying token', { error: error.message });
-    
+
     res.status(500).json({
       error: {
         code: 'SERVER_ERROR',
@@ -1397,7 +1397,7 @@ app.post('/auth/verify', async (req, res) => {
 app.post('/demo/orb-trigger', async (req, res) => {
   try {
     const { farmerId, phoneNumber } = req.body;
-    
+
     // Demo Constraints: Simple validation
     if (!phoneNumber) {
       return res.status(400).json({ error: 'Phone number is required' });
@@ -1423,11 +1423,15 @@ app.post('/demo/orb-trigger', async (req, res) => {
 
     if (!accountSid || !authToken || !fromNumber) {
       console.warn('⚠️ Twilio credentials missing in .env');
-      return res.status(503).json({ 
+      return res.status(503).json({
         error: 'Twilio not configured',
         demoData // Return data anyway so frontend can debug if needed
       });
     }
+
+
+
+
 
     const client = twilio(accountSid, authToken);
 
@@ -1501,16 +1505,16 @@ app.post('/activities', authenticate, async (req, res) => {
   const startTime = Date.now();
   try {
     const { farmerId, description, type, details } = req.body;
-    
+
     // Validation
     if (!farmerId || !description) {
       const duration = Date.now() - startTime;
-      logger.warn('Activity logging failed - missing required fields', { 
+      logger.warn('Activity logging failed - missing required fields', {
         farmerId,
         missingFields: [!farmerId ? 'farmerId' : null, !description ? 'description' : null].filter(Boolean),
         durationMs: duration
       });
-      
+
       return res.status(400).json({
         error: {
           code: 'VALIDATION_ERROR',
@@ -1518,7 +1522,7 @@ app.post('/activities', authenticate, async (req, res) => {
         }
       });
     }
-    
+
     const activity = {
       farmerId,
       description,
@@ -1526,43 +1530,43 @@ app.post('/activities', authenticate, async (req, res) => {
       details: details || {},
       date: new Date()
     };
-    
+
     // Insert activity into MongoDB
     const result = await activitiesCollection.insertOne(activity);
     activity._id = result.insertedId;
-    
+
     const duration = Date.now() - startTime;
-    logDBOperation('insertActivity', { 
+    logDBOperation('insertActivity', {
       farmerId,
       activityType: type,
       activityId: result.insertedId.toString(),
       durationMs: duration,
       status: 'success'
     });
-    
-    logger.info('Activity logged successfully', { 
-      farmerId, 
+
+    logger.info('Activity logged successfully', {
+      farmerId,
       activityId: result.insertedId.toString(),
       durationMs: duration
     });
-    
+
     res.status(201).json({
       status: 'success',
       data: activity
     });
   } catch (error) {
     const duration = Date.now() - startTime;
-    logDBError('insertActivity', error, { 
-      farmerId: req.body?.farmerId, 
+    logDBError('insertActivity', error, {
+      farmerId: req.body?.farmerId,
       activityType: req.body?.type,
       durationMs: duration
     });
-    logger.error('Error logging activity', { 
+    logger.error('Error logging activity', {
       error: error.message,
       farmerId: req.body?.farmerId,
       durationMs: duration
     });
-    
+
     res.status(500).json({
       error: {
         code: 'SERVER_ERROR',
@@ -1578,16 +1582,16 @@ app.get('/activities/:farmerId', authenticate, async (req, res) => {
   try {
     const { farmerId } = req.params;
     const { limit = 10, offset = 0, type } = req.query;
-    
+
     // Build query
     const query = { farmerId: farmerId };
     if (type) {
       query.type = type;
     }
-    
+
     // Get total count
     const total = await activitiesCollection.countDocuments(query);
-    
+
     // Get paginated activities
     const activities = await activitiesCollection
       .find(query)
@@ -1595,25 +1599,25 @@ app.get('/activities/:farmerId', authenticate, async (req, res) => {
       .skip(parseInt(offset))
       .limit(parseInt(limit))
       .toArray();
-    
+
     const duration = Date.now() - startTime;
-    logDBOperation('findActivities', { 
-      farmerId, 
-      limit, 
-      offset, 
+    logDBOperation('findActivities', {
+      farmerId,
+      limit,
+      offset,
       type,
       total,
       returned: activities.length,
       durationMs: duration,
       status: 'success'
     });
-    
-    logger.info('Activities retrieved successfully', { 
-      farmerId, 
+
+    logger.info('Activities retrieved successfully', {
+      farmerId,
       count: activities.length,
       durationMs: duration
     });
-    
+
     res.status(200).json({
       status: 'success',
       data: activities,
@@ -1625,16 +1629,16 @@ app.get('/activities/:farmerId', authenticate, async (req, res) => {
     });
   } catch (error) {
     const duration = Date.now() - startTime;
-    logDBError('findActivities', error, { 
+    logDBError('findActivities', error, {
       farmerId: req.params?.farmerId,
       durationMs: duration
     });
-    logger.error('Error fetching activities', { 
+    logger.error('Error fetching activities', {
       error: error.message,
       farmerId: req.params?.farmerId,
       durationMs: duration
     });
-    
+
     res.status(500).json({
       error: {
         code: 'SERVER_ERROR',
@@ -1651,14 +1655,14 @@ app.post('/mandiprices/update', authenticate, async (req, res) => {
   const startTime = Date.now();
   try {
     const { prices } = req.body;
-    
+
     // Validation
     if (!Array.isArray(prices)) {
       const duration = Date.now() - startTime;
       logger.warn('Mandi price update failed - prices must be an array', {
         durationMs: duration
       });
-      
+
       return res.status(400).json({
         error: {
           code: 'VALIDATION_ERROR',
@@ -1666,23 +1670,23 @@ app.post('/mandiprices/update', authenticate, async (req, res) => {
         }
       });
     }
-    
+
     // Insert prices into MongoDB
     const result = await mandipricesCollection.insertMany(prices);
-    
+
     const duration = Date.now() - startTime;
-    logDBOperation('insertMandiPrices', { 
+    logDBOperation('insertMandiPrices', {
       priceCount: prices.length,
       insertedCount: result.insertedCount,
       durationMs: duration,
       status: 'success'
     });
-    
-    logger.info('Mandi prices updated successfully', { 
+
+    logger.info('Mandi prices updated successfully', {
       insertedCount: result.insertedCount,
       durationMs: duration
     });
-    
+
     res.status(200).json({
       status: 'success',
       data: {
@@ -1695,11 +1699,11 @@ app.post('/mandiprices/update', authenticate, async (req, res) => {
     logDBError('insertMandiPrices', error, {
       durationMs: duration
     });
-    logger.error('Error updating mandi prices', { 
+    logger.error('Error updating mandi prices', {
       error: error.message,
       durationMs: duration
     });
-    
+
     res.status(500).json({
       error: {
         code: 'SERVER_ERROR',
@@ -1714,10 +1718,10 @@ app.get('/mandiprices', authenticate, async (req, res) => {
   const startTime = Date.now();
   try {
     const { crop, location } = req.query;
-    
+
     // Build aggregation pipeline to get latest prices
     const pipeline = [];
-    
+
     // Match stage
     const match = {};
     if (crop) match.crop = crop;
@@ -1725,10 +1729,10 @@ app.get('/mandiprices', authenticate, async (req, res) => {
     if (Object.keys(match).length > 0) {
       pipeline.push({ $match: match });
     }
-    
+
     // Sort by date descending
     pipeline.push({ $sort: { date: -1 } });
-    
+
     // Group by crop and location to get latest for each
     pipeline.push({
       $group: {
@@ -1736,49 +1740,49 @@ app.get('/mandiprices', authenticate, async (req, res) => {
         latestPrice: { $first: "$$ROOT" }
       }
     });
-    
+
     // Project to get the original document structure
     pipeline.push({
       $replaceRoot: { newRoot: "$latestPrice" }
     });
-    
+
     // Execute aggregation
     const latestPrices = await mandipricesCollection.aggregate(pipeline).toArray();
-    
+
     const duration = Date.now() - startTime;
-    logDBOperation('findMandiPrices', { 
-      crop, 
+    logDBOperation('findMandiPrices', {
+      crop,
       location,
       returned: latestPrices.length,
       durationMs: duration,
       status: 'success'
     });
-    
-    logger.info('Mandi prices retrieved successfully', { 
-      count: latestPrices.length, 
-      crop, 
+
+    logger.info('Mandi prices retrieved successfully', {
+      count: latestPrices.length,
+      crop,
       location,
       durationMs: duration
     });
-    
+
     res.status(200).json({
       status: 'success',
       data: latestPrices
     });
   } catch (error) {
     const duration = Date.now() - startTime;
-    logDBError('findMandiPrices', error, { 
-      crop, 
+    logDBError('findMandiPrices', error, {
+      crop,
       location,
       durationMs: duration
     });
-    logger.error('Error fetching mandi prices', { 
+    logger.error('Error fetching mandi prices', {
       error: error.message,
       crop,
       location,
       durationMs: duration
     });
-    
+
     res.status(500).json({
       error: {
         code: 'SERVER_ERROR',
@@ -1794,16 +1798,16 @@ app.post('/ai/chat', authenticate, async (req, res) => {
   try {
     const { farmerId, userId, query, context = {}, language: requestedLanguage } = req.body;
     const userIdentifier = normalizeUserKey(userId || farmerId || req.userId, farmerId);
-    
+
     // Validation
     if (!userIdentifier || !query) {
       const duration = Date.now() - startTime;
-      logger.warn('AI chat request failed - missing required fields', { 
+      logger.warn('AI chat request failed - missing required fields', {
         userIdentifier,
         missingFields: [!userIdentifier ? 'userId/farmerId' : null, !query ? 'query' : null].filter(Boolean),
         durationMs: duration
       });
-      
+
       return res.status(400).json({
         error: {
           code: 'VALIDATION_ERROR',
@@ -1811,7 +1815,7 @@ app.post('/ai/chat', authenticate, async (req, res) => {
         }
       });
     }
-    
+
     let userDoc = null;
     try {
       userDoc = await findUserDocument(userIdentifier, farmerId);
@@ -1831,7 +1835,7 @@ app.post('/ai/chat', authenticate, async (req, res) => {
       try {
         const contextDoc = await fetchUserContext(contextUserId);
         userContextPayload = formatUserContextResponse(contextDoc);
-        
+
         if (userContextPayload) {
           logger.info('UserContext loaded for AI request', {
             userId: contextUserId?.toString(),
@@ -1870,19 +1874,19 @@ app.post('/ai/chat', authenticate, async (req, res) => {
         }
       }
     } catch (error) {
-      logger.warn('Could not fetch farmer profile for AI context', { 
-        farmerId: farmerId || userIdentifier, 
-        error: error.message 
+      logger.warn('Could not fetch farmer profile for AI context', {
+        farmerId: farmerId || userIdentifier,
+        error: error.message
       });
     }
-    
+
     const memoryEntries = await getUserMemoryEntries(memoryKey, DEFAULT_MEMORY_SLICE);
 
     // STEP 3: Generate AI response with full context
     // Build structured prompt with user data + last 5 conversations + current query
     const userData = userContextPayload?.userData || {};
     const lastConversations = userContextPayload?.query || [];
-    
+
     // Format the LLM prompt with all user context
     const llmPrompt = {
       query: query,
@@ -1912,18 +1916,18 @@ app.post('/ai/chat', authenticate, async (req, res) => {
         land_size: farmerProfile.landSize
       } : null
     };
-    
+
     // Log the exact prompt that LLM will receive
     logger.info('LLM Prompt Generated', {
       userId: contextUserId?.toString(),
       prompt: JSON.stringify(llmPrompt, null, 2)
     });
-    
+
     // TODO: Replace this mock response with actual LLM API call
     // Example: const aiResponse = await callLLM(llmPrompt);
     // For now, we'll simulate a farmer-friendly response
     let aiResponse = `Based on your query "${query}", I recommend checking the latest mandi prices for your crops and considering weather conditions in your area.`;
-    
+
     // For demonstration, we'll customize the response based on language
     if (resolvedLanguage === 'hi') {
       aiResponse = `आपके प्रश्न "${query}" के आधार पर, मैं अनुशंसा करता हूं कि आप अपनी फसलों के नवीनतम मंडी भाव देखें और अपने क्षेत्र में मौसम की स्थिति पर विचार करें।`;
@@ -1932,7 +1936,7 @@ app.post('/ai/chat', authenticate, async (req, res) => {
     } else if (resolvedLanguage === 'mr') {
       aiResponse = `तुमच्या "${query}" प्रश्नाच्या आधारावर, मी तुम्हाला तुमच्या पीकांसाठी नवीनतम मंडी भाव तपासण्याची आणि तुमच्या क्षेत्रातील हवामानाच्या परिस्थितीचा विचार करण्याची शिफारस करतो.`;
     }
-    
+
     // Mock automations
     const automations = [
       {
@@ -1943,7 +1947,7 @@ app.post('/ai/chat', authenticate, async (req, res) => {
         }
       }
     ];
-    
+
     // Mock related data
     const relatedData = {
       weatherForecast: {
@@ -1951,7 +1955,7 @@ app.post('/ai/chat', authenticate, async (req, res) => {
         temperatureRange: '25-32°C'
       }
     };
-    
+
     const memoryToAppend = [
       { role: 'user', content: query },
       { role: 'assistant', content: aiResponse }
@@ -1968,11 +1972,11 @@ app.post('/ai/chat', authenticate, async (req, res) => {
         language: resolvedLanguage,
         timestamp: new Date()
       };
-      
+
       await aiinteractionsCollection.insertOne(aiInteraction);
       logger.info('AI interaction saved to database', { userIdentifier });
     } catch (dbError) {
-      logger.error('Failed to save AI interaction to database', { 
+      logger.error('Failed to save AI interaction to database', {
         error: dbError.message,
         userIdentifier
       });
@@ -1987,12 +1991,12 @@ app.post('/ai/chat', authenticate, async (req, res) => {
           queryLength: query?.length,
           responseLength: aiResponse?.length
         });
-        
+
         await appendChatMessage(contextUserId, [
           { role: 'user', message: query },        // Save user question
           { role: 'assistant', message: aiResponse } // Save AI response
         ]);
-        
+
         logger.info('Conversation saved to UserContext.query', {
           userId: contextUserId?.toString(),
           messagesSaved: 2
@@ -2010,21 +2014,21 @@ app.post('/ai/chat', authenticate, async (req, res) => {
         hasUserDoc: !!userDoc
       });
     }
-    
+
     const duration = Date.now() - startTime;
-    logDBOperation('aiChat', { 
+    logDBOperation('aiChat', {
       userId: memoryKey,
       durationMs: duration,
       status: 'success'
     });
-    
-    logger.info('AI chat response generated', { 
+
+    logger.info('AI chat response generated', {
       userId: memoryKey,
       durationMs: duration
     });
 
     const latestMemory = [...memoryEntries, ...memoryToAppend].slice(-DEFAULT_MEMORY_SLICE);
-    
+
     res.status(200).json({
       status: 'success',
       data: {
@@ -2038,16 +2042,16 @@ app.post('/ai/chat', authenticate, async (req, res) => {
     });
   } catch (error) {
     const duration = Date.now() - startTime;
-    logDBError('aiChat', error, { 
+    logDBError('aiChat', error, {
       userId: req.body?.userId || req.body?.farmerId,
       durationMs: duration
     });
-    logger.error('Error processing AI chat request', { 
+    logger.error('Error processing AI chat request', {
       error: error.message,
       userId: req.body?.userId || req.body?.farmerId,
       durationMs: duration
     });
-    
+
     res.status(500).json({
       error: {
         code: 'SERVER_ERROR',
@@ -2062,23 +2066,23 @@ app.post('/ai/interactions', authenticate, async (req, res) => {
   const startTime = Date.now();
   try {
     const { farmerId, userId, query, response, context, language } = req.body;
-    
+
     // Accept either farmerId (legacy) or userId (new)
     const userIdentifier = normalizeUserKey(userId || farmerId || req.userId, farmerId);
-    
+
     // Validation
     if (!userIdentifier || !query || !response) {
       const duration = Date.now() - startTime;
-      logger.warn('AI interaction save failed - missing required fields', { 
+      logger.warn('AI interaction save failed - missing required fields', {
         userIdentifier,
         missingFields: [
-          !userIdentifier ? 'userId/farmerId' : null, 
+          !userIdentifier ? 'userId/farmerId' : null,
           !query ? 'query' : null,
           !response ? 'response' : null
         ].filter(Boolean),
         durationMs: duration
       });
-      
+
       return res.status(400).json({
         error: {
           code: 'VALIDATION_ERROR',
@@ -2086,7 +2090,7 @@ app.post('/ai/interactions', authenticate, async (req, res) => {
         }
       });
     }
-    
+
     // Save AI interaction to database
     const aiInteraction = {
       userId: userIdentifier,  // Store as userId for consistency
@@ -2097,7 +2101,7 @@ app.post('/ai/interactions', authenticate, async (req, res) => {
       language: language || 'en',
       timestamp: new Date()
     };
-    
+
     const result = await aiinteractionsCollection.insertOne(aiInteraction);
 
     try {
@@ -2111,21 +2115,21 @@ app.post('/ai/interactions', authenticate, async (req, res) => {
         userIdentifier
       });
     }
-    
+
     const duration = Date.now() - startTime;
-    logDBOperation('saveAIInteraction', { 
+    logDBOperation('saveAIInteraction', {
       userId: userIdentifier,
       interactionId: result.insertedId.toString(),
       durationMs: duration,
       status: 'success'
     });
-    
-    logger.info('AI interaction saved successfully', { 
+
+    logger.info('AI interaction saved successfully', {
       userId: userIdentifier,
       interactionId: result.insertedId.toString(),
       durationMs: duration
     });
-    
+
     res.status(201).json({
       status: 'success',
       data: {
@@ -2134,16 +2138,16 @@ app.post('/ai/interactions', authenticate, async (req, res) => {
     });
   } catch (error) {
     const duration = Date.now() - startTime;
-    logDBError('saveAIInteraction', error, { 
+    logDBError('saveAIInteraction', error, {
       userId: req.body?.userId || req.body?.farmerId,
       durationMs: duration
     });
-    logger.error('Error saving AI interaction', { 
+    logger.error('Error saving AI interaction', {
       error: error.message,
       userId: req.body?.userId || req.body?.farmerId,
       durationMs: duration
     });
-    
+
     res.status(500).json({
       error: {
         code: 'SERVER_ERROR',
@@ -2162,14 +2166,14 @@ app.get('/weather', async (req, res) => {
   const startTime = Date.now();
   try {
     const { lat, lon } = req.query;
-    
+
     // Validation
     if (!lat || !lon) {
       const duration = Date.now() - startTime;
-      logger.warn('Weather request failed - missing coordinates', { 
+      logger.warn('Weather request failed - missing coordinates', {
         durationMs: duration
       });
-      
+
       return res.status(400).json({
         error: {
           code: 'VALIDATION_ERROR',
@@ -2177,14 +2181,14 @@ app.get('/weather', async (req, res) => {
         }
       });
     }
-    
+
     // Check cache first
     const cacheKey = `${parseFloat(lat).toFixed(2)},${parseFloat(lon).toFixed(2)}`;
     const cachedData = weatherCache.get(cacheKey);
-    
+
     if (cachedData && Date.now() - cachedData.timestamp < WEATHER_CACHE_TTL) {
       const duration = Date.now() - startTime;
-      logger.info('Weather data served from cache', { 
+      logger.info('Weather data served from cache', {
         lat, lon, durationMs: duration
       });
       return res.status(200).json({
@@ -2192,7 +2196,7 @@ app.get('/weather', async (req, res) => {
         data: { ...cachedData.data, cached: true }
       });
     }
-    
+
     const apiKey = process.env.TOMORROW_API_KEY;
     if (!apiKey) {
       logger.error('Tomorrow.io API key not configured');
@@ -2210,18 +2214,18 @@ app.get('/weather', async (req, res) => {
         }
       });
     }
-    
+
     // Call Tomorrow.io API
     const tomorrowUrl = `https://api.tomorrow.io/v4/weather/forecast?location=${lat},${lon}&apikey=${apiKey}`;
     const response = await fetch(tomorrowUrl);
-    
+
     if (!response.ok) {
       // Handle rate limiting - use cached data if available
       if (response.status === 429) {
-        logger.warn('Tomorrow.io rate limit exceeded, using cache or fallback', { 
+        logger.warn('Tomorrow.io rate limit exceeded, using cache or fallback', {
           status: response.status
         });
-        
+
         // Return stale cache if available
         if (cachedData) {
           return res.status(200).json({
@@ -2229,7 +2233,7 @@ app.get('/weather', async (req, res) => {
             data: { ...cachedData.data, cached: true, stale: true }
           });
         }
-        
+
         // Return fallback data
         return res.status(200).json({
           status: 'success',
@@ -2247,19 +2251,19 @@ app.get('/weather', async (req, res) => {
       }
       throw new Error(`Tomorrow.io API error: ${response.status}`);
     }
-    
+
     const data = await response.json();
-    
+
     // Parse current weather data
     const current = data.timelines?.minutely?.[0]?.values || data.timelines?.hourly?.[0]?.values || {};
-    
+
     // Extract weather values
     const temperature = current.temperature || current.temperatureApparent || 0;
     const humidity = current.humidity || 0;
     const windSpeed = current.windSpeed || 0;
     const precipitationProbability = current.precipitationProbability || 0;
     const weatherCode = current.weatherCode || 0;
-    
+
     // Extract 7-day forecast from daily timeline
     const dailyTimeline = data.timelines?.daily || [];
     const forecast = dailyTimeline.slice(0, 7).map(day => {
@@ -2272,7 +2276,7 @@ app.get('/weather', async (req, res) => {
         precipitationProbability: Math.round(values.precipitationProbability || 0)
       };
     });
-    
+
     // Map weather codes to descriptions
     const weatherDescriptions = {
       0: 'Unknown',
@@ -2303,9 +2307,9 @@ app.get('/weather', async (req, res) => {
       7102: 'Light Ice Pellets',
       8000: 'Thunderstorm'
     };
-    
+
     const condition = weatherDescriptions[weatherCode] || 'Unknown';
-    
+
     // Generate advisory based on weather conditions
     let advisory = '';
     if (precipitationProbability > 70) {
@@ -2321,16 +2325,16 @@ app.get('/weather', async (req, res) => {
     } else {
       advisory = 'Favorable conditions for farming activities. Plan your fieldwork accordingly.';
     }
-    
+
     const duration = Date.now() - startTime;
-    logger.info('Weather data retrieved successfully', { 
+    logger.info('Weather data retrieved successfully', {
       lat,
       lon,
       temperature,
       condition,
       durationMs: duration
     });
-    
+
     // Prepare weather data for database
     const weatherDataDoc = {
       location: {
@@ -2350,20 +2354,20 @@ app.get('/weather', async (req, res) => {
       timestamp: new Date(),
       source: 'tomorrow.io'
     };
-    
+
     // Save to MongoDB
     try {
       await weatherDataCollection.insertOne(weatherDataDoc);
       logger.info('Weather data saved to database', { lat, lon });
     } catch (dbError) {
-      logger.error('Failed to save weather data to database', { 
+      logger.error('Failed to save weather data to database', {
         error: dbError.message,
         lat,
         lon
       });
       // Don't fail the request if DB save fails
     }
-    
+
     // Cache the result
     weatherCache.set(cacheKey, {
       timestamp: Date.now(),
@@ -2378,7 +2382,7 @@ app.get('/weather', async (req, res) => {
         forecast
       }
     });
-    
+
     res.status(200).json({
       status: 'success',
       data: {
@@ -2395,15 +2399,15 @@ app.get('/weather', async (req, res) => {
     });
   } catch (error) {
     const duration = Date.now() - startTime;
-    logger.error('Error fetching weather data', { 
+    logger.error('Error fetching weather data', {
       error: error.message,
       durationMs: duration
     });
-    
+
     // Try to return cached data even if stale
     const cacheKey = `${parseFloat(req.query.lat).toFixed(2)},${parseFloat(req.query.lon).toFixed(2)}`;
     const cachedData = weatherCache.get(cacheKey);
-    
+
     if (cachedData) {
       logger.info('Returning stale cached data due to error');
       return res.status(200).json({
@@ -2411,7 +2415,7 @@ app.get('/weather', async (req, res) => {
         data: { ...cachedData.data, cached: true, stale: true }
       });
     }
-    
+
     // Last resort fallback
     res.status(200).json({
       status: 'success',
@@ -2434,14 +2438,14 @@ app.post('/weather/location', authenticate, async (req, res) => {
   const startTime = Date.now();
   try {
     const { lat, lon, address, userId } = req.body;
-    
+
     // Validation
     if (!lat || !lon) {
       const duration = Date.now() - startTime;
-      logger.warn('Location save request failed - missing coordinates', { 
+      logger.warn('Location save request failed - missing coordinates', {
         durationMs: duration
       });
-      
+
       return res.status(400).json({
         error: {
           code: 'VALIDATION_ERROR',
@@ -2449,7 +2453,7 @@ app.post('/weather/location', authenticate, async (req, res) => {
         }
       });
     }
-    
+
     const parsedLat = parseFloat(lat);
     const parsedLon = parseFloat(lon);
     const resolvedAddress = address?.trim() || 'Address not provided';
@@ -2467,12 +2471,12 @@ app.post('/weather/location', authenticate, async (req, res) => {
       timestamp: new Date(),
       lastAccessed: new Date()
     };
-    
+
     // Update or insert location (upsert based on userId)
     try {
       await weatherDataCollection.updateOne(
         { userId: locationDoc.userId },
-        { 
+        {
           $set: locationDoc,
           $setOnInsert: { createdAt: new Date() }
         },
@@ -2511,9 +2515,9 @@ app.post('/weather/location', authenticate, async (req, res) => {
           });
         }
       }
-      
+
       const duration = Date.now() - startTime;
-      logger.info('User location and address saved to database', { 
+      logger.info('User location and address saved to database', {
         userId: locationDoc.userId,
         lat,
         lon,
@@ -2521,7 +2525,7 @@ app.post('/weather/location', authenticate, async (req, res) => {
         userProfileUpdated,
         durationMs: duration
       });
-      
+
       res.status(200).json({
         status: 'success',
         message: 'Location and address saved successfully',
@@ -2529,12 +2533,12 @@ app.post('/weather/location', authenticate, async (req, res) => {
       });
     } catch (dbError) {
       const duration = Date.now() - startTime;
-      logger.error('Failed to save location to database', { 
+      logger.error('Failed to save location to database', {
         error: dbError.message,
         userId: locationDoc.userId,
         durationMs: duration
       });
-      
+
       res.status(500).json({
         error: {
           code: 'DATABASE_ERROR',
@@ -2544,11 +2548,11 @@ app.post('/weather/location', authenticate, async (req, res) => {
     }
   } catch (error) {
     const duration = Date.now() - startTime;
-    logger.error('Error processing location save request', { 
+    logger.error('Error processing location save request', {
       error: error.message,
       durationMs: duration
     });
-    
+
     res.status(500).json({
       error: {
         code: 'SERVER_ERROR',
@@ -2609,12 +2613,12 @@ app.get('/training/metrics', async (req, res) => {
 
 // 404 handler
 app.use('*', (req, res) => {
-  logger.warn('Endpoint not found', { 
+  logger.warn('Endpoint not found', {
     url: req.originalUrl,
     method: req.method,
     ip: req.ip
   });
-  
+
   res.status(404).json({
     error: {
       code: 'NOT_FOUND',
@@ -2625,14 +2629,14 @@ app.use('*', (req, res) => {
 
 // Global error handler
 app.use((error, req, res, next) => {
-  logger.error('Unhandled error', { 
+  logger.error('Unhandled error', {
     error: error.message,
     stack: error.stack,
     url: req.originalUrl,
     method: req.method,
     ip: req.ip
   });
-  
+
   res.status(500).json({
     error: {
       code: 'SERVER_ERROR',
