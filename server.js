@@ -14,6 +14,7 @@ const { logger, logDBOperation, logDBError } = require('./logger');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const twilio = require('twilio'); // Twilio SDK
 const { generateSpeech } = require('./tts');
 const sgMail = require('@sendgrid/mail');
 const { ObjectId } = require('mongodb');
@@ -1381,6 +1382,116 @@ app.post('/auth/verify', async (req, res) => {
       }
     });
   }
+});
+
+// 3. Activity Tracking
+// ... (existing activity routes) ...
+
+/* ==========================================================================
+   JUDGE DEMO: ORB VOICE TRIGGER
+   ========================================================================== */
+
+// POST /demo/orb-trigger
+// Triggered by Frontend Triple-Tap
+// Initiates an outgoing call to the user via Twilio
+app.post('/demo/orb-trigger', async (req, res) => {
+  try {
+    const { farmerId, phoneNumber } = req.body;
+    
+    // Demo Constraints: Simple validation
+    if (!phoneNumber) {
+      return res.status(400).json({ error: 'Phone number is required' });
+    }
+
+    console.log(`🔮 Demo Triggered! calling ${phoneNumber}...`);
+
+    // HARDCODED DEMO DATA
+    // In a real app, we would fetch location from farmerId, then find nearby Mandi, then get prices.
+    const demoData = {
+      location: "JSPM Tathawade College, Pune",
+      prices: [
+        { commodity: "Tomato", price: 18, unit: "kg" },
+        { commodity: "Onion", price: 22, unit: "kg" },
+        { commodity: "Potato", price: 16, unit: "kg" }
+      ]
+    };
+
+    // TWILIO CALL LOGIC
+    const accountSid = process.env.TWILIO_ACCOUNT_SID;
+    const authToken = process.env.TWILIO_AUTH_TOKEN;
+    const fromNumber = process.env.TWILIO_PHONE_NUMBER; // Must be a purchased Twilio number
+
+    if (!accountSid || !authToken || !fromNumber) {
+      console.warn('⚠️ Twilio credentials missing in .env');
+      return res.status(503).json({ 
+        error: 'Twilio not configured',
+        demoData // Return data anyway so frontend can debug if needed
+      });
+    }
+
+    const client = twilio(accountSid, authToken);
+
+    // Make the call
+    // logic: "When they pick up, hit /demo/orb-voice to get TwiML"
+    // Use ngrok/public URL for 'url' parameter if running locally (Render/Heroku handles this automatically)
+    // For local dev without ngrok, this callback won't work unless exposed.
+    // Assuming backend is accessible via public URL or ngrok.
+    const protocol = req.secure ? 'https' : 'http';
+    const host = req.get('host');
+    const callbackUrl = `${protocol}://${host}/demo/orb-voice`;
+
+    const call = await client.calls.create({
+      url: callbackUrl,
+      to: phoneNumber,
+      from: fromNumber
+    });
+
+    console.log(`📞 Call initiated: ${call.sid}`);
+
+    res.json({
+      status: 'success',
+      message: 'Calling farmer...',
+      callSid: call.sid,
+      demoData
+    });
+
+  } catch (error) {
+    console.error('🔥 Demo Trigger Error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /demo/orb-voice
+// Twilio Webhook: Returns TwiML (Voice XML) to speak to the user
+app.post('/demo/orb-voice', (req, res) => {
+  const VoiceResponse = twilio.twiml.VoiceResponse;
+  const response = new VoiceResponse();
+
+  // HARDCODED VOICE MESSAGE
+  // "Namaskar. This is KrushiMitra Orb..."
+  const message = `
+    Namaskar. 
+    This is Krushi Mitra Orb. 
+    Today’s mandi price update near Tathawade. 
+    Tomato is selling at 18 rupees per kilo. 
+    Onion is 22 rupees per kilo. 
+    Potato is 16 rupees per kilo. 
+    You may plan selling accordingly. 
+    Thank you.
+  `;
+
+  // <Say> verb with reasonable voice settings
+  response.say({
+    voice: 'alice', // 'alice' supports multiple languages, or use 'woman'
+    language: 'en-IN' // Indian English accent
+  }, message);
+
+  // End the call
+  response.hangup();
+
+  // Return XML
+  res.type('text/xml');
+  res.send(response.toString());
 });
 
 // 3. Activity Tracking
