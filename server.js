@@ -28,7 +28,11 @@ const {
 } = require('./user-context');
 
 // Initialize Google OAuth client
-const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+// Initialize Google OAuth client
+const googleClient = new OAuth2Client(
+  process.env.GOOGLE_CLIENT_ID,
+  process.env.GOOGLE_CLIENT_SECRET
+);
 
 // Ensure the working directory is the backend folder even if started from project root
 // This prevents relative path lookups (e.g. accidental attempts to access `./health`) from resolving against the root.
@@ -676,7 +680,7 @@ app.post('/auth/google', async (req, res) => {
   const startTime = Date.now();
   try {
     // Determine if we received a code (web flow) or idToken (mobile/other flow)
-    const { code, idToken } = req.body;
+    const { code, idToken, redirect_uri } = req.body;
 
     if (!code && !idToken) {
       return res.status(400).json({
@@ -690,8 +694,11 @@ app.post('/auth/google', async (req, res) => {
     if (code) {
       try {
         // Exchange code for tokens (access_token, id_token, refresh_token)
-        // This is where the client_secret is used securely on the server
-        const { tokens } = await googleClient.getToken(code);
+        // We MUST pass the same redirect_uri that was used on the frontend
+        const { tokens } = await googleClient.getToken({
+          code,
+          redirect_uri // Pass the redirect_uri received from frontend
+        });
 
         // Determine the ID Token from the response
         const idTokenFromCode = tokens.id_token;
