@@ -18,6 +18,7 @@ const twilio = require('twilio'); // Twilio SDK
 const { generateSpeech } = require('./tts');
 const sgMail = require('@sendgrid/mail');
 const { ObjectId } = require('mongodb');
+const { OAuth2Client } = require('google-auth-library'); // Google OAuth verification
 const {
   initUserContextCollection,
   ensureUserContext,
@@ -25,6 +26,9 @@ const {
   appendChatMessage,
   fetchUserContext
 } = require('./user-context');
+
+// Initialize Google OAuth client
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 // Ensure the working directory is the backend folder even if started from project root
 // This prevents relative path lookups (e.g. accidental attempts to access `./health`) from resolving against the root.
@@ -671,18 +675,67 @@ app.get('/farmers/:phone', authenticate, async (req, res) => {
 app.post('/auth/google', async (req, res) => {
   const startTime = Date.now();
   try {
-    const { idToken, user } = req.body;
+    // Determine if we received a code (web flow) or idToken (mobile/other flow)
+    const { code, idToken } = req.body;
 
-    if (!idToken || !user || !user.email) {
+    if (!code && !idToken) {
       return res.status(400).json({
-        error: { code: 'VALIDATION_ERROR', message: 'ID token and user email are required' }
+        error: { code: 'VALIDATION_ERROR', message: 'Auth code or ID token is required' }
       });
     }
 
-    // In production, verify the idToken with Google
-    // For now, we'll trust the client-side verification
+    let payload;
 
-    const { email, name, photo, id: googleId } = user;
+    // SCENARIO 1: We received an Authorization Code (Web Flow)
+    if (code) {
+      try {
+        // Exchange code for tokens (access_token, id_token, refresh_token)
+        // This is where the client_secret is used securely on the server
+        const { tokens } = await googleClient.getToken(code);
+
+        // Determine the ID Token from the response
+        const idTokenFromCode = tokens.id_token;
+        if (!idTokenFromCode) {
+          throw new Error('No ID token returned from code exchange');
+        }
+
+        // Verify the ID token
+        const ticket = await googleClient.verifyIdToken({
+          idToken: idTokenFromCode,
+          audience: process.env.GOOGLE_CLIENT_ID,
+        });
+        payload = ticket.getPayload();
+      } catch (exchangeError) {
+        logger.error('Google code exchange failed', { error: exchangeError.message });
+        return res.status(401).json({
+          error: { code: 'INVALID_GRANT', message: 'Failed to exchange authorization code' }
+        });
+      }
+    }
+    // SCENARIO 2: We received an ID Token directly (Mobile/Implicit Flow)
+    else {
+      try {
+        const ticket = await googleClient.verifyIdToken({
+          idToken: idToken,
+          audience: process.env.GOOGLE_CLIENT_ID,
+        });
+        payload = ticket.getPayload();
+      } catch (verifyError) {
+        logger.error('Google token verification failed', { error: verifyError.message });
+        return res.status(401).json({
+          error: { code: 'INVALID_TOKEN', message: 'Invalid Google ID token' }
+        });
+      }
+    }
+
+    const { sub: googleId, email, name, picture: photo } = payload;
+
+    if (!email) {
+      return res.status(400).json({
+        error: { code: 'VALIDATION_ERROR', message: 'Email not found in Google token' }
+      });
+    }
+
     const now = new Date();
 
     // Check if user exists
@@ -695,7 +748,8 @@ app.post('/auth/google', async (req, res) => {
           $set: {
             lastLogin: now,
             name,
-            photo
+            photo,
+            googleId
           }
         }
       );
@@ -703,6 +757,7 @@ app.post('/auth/google', async (req, res) => {
         ...existingUser,
         name,
         photo,
+        googleId,
         lastLogin: now
       };
 
@@ -1484,10 +1539,10 @@ app.post('/demo/orb-voice', (req, res) => {
     Thank you.
   `;
 
-  // <Say> verb with reasonable voice settings
+  // <Say> verb with male voice for friendly, natural tone
   response.say({
-    voice: 'alice', // 'alice' supports multiple languages, or use 'woman'
-    language: 'en-IN' // Indian English accent
+    voice: 'man', // Male voice - sounds more like a friend
+    language: 'hi-IN' // Hindi for natural Indian accent
   }, message);
 
   // End the call
