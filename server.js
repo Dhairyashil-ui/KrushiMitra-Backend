@@ -19,6 +19,7 @@ const { generateSpeech } = require('./tts');
 const sgMail = require('@sendgrid/mail');
 const { ObjectId } = require('mongodb');
 const { OAuth2Client } = require('google-auth-library'); // Google OAuth verification
+
 const {
   initUserContextCollection,
   ensureUserContext,
@@ -28,12 +29,13 @@ const {
 } = require('./user-context');
 
 // Initialize Google OAuth client
-// Initialize Google OAuth client
 const googleClient = new OAuth2Client(
   process.env.GOOGLE_CLIENT_ID,
   process.env.GOOGLE_CLIENT_SECRET,
-  `${process.env.FRONTEND_URL || 'http://localhost:3000'}` // Redirect URI
+  `${process.env.FRONTEND_URL || 'http://localhost:3000'}` // Default Redirect URI
 );
+
+
 
 // Ensure the working directory is the backend folder even if started from project root
 // This prevents relative path lookups (e.g. accidental attempts to access `./health`) from resolving against the root.
@@ -696,9 +698,10 @@ app.post('/auth/google', async (req, res) => {
       try {
         // Exchange code for tokens (access_token, id_token, refresh_token)
         // We MUST pass the same redirect_uri that was used on the frontend
+        // This is critical for security: backend must match frontend's redirect URI
         const { tokens } = await googleClient.getToken({
           code,
-          redirect_uri,
+          redirect_uri, // Use the redirect_uri passed from frontend
           client_id: process.env.GOOGLE_CLIENT_ID,
           client_secret: process.env.GOOGLE_CLIENT_SECRET
         });
@@ -846,6 +849,8 @@ app.post('/auth/google', async (req, res) => {
     });
   }
 });
+
+
 
 // GET /auth/user/:userId - Get user profile
 app.get('/auth/user/:userId', async (req, res) => {
