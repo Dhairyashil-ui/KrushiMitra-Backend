@@ -1,0 +1,22 @@
+2026-01-20 00:36:19,045 - main - ERROR - predict_disease:136 - Prediction failed: Numpy is not available
+2026-01-20 00:45:40,615 - main - ERROR - predict_disease:136 - Prediction failed: Numpy is not available
+2026-01-20 00:48:34,031 - main - ERROR - predict_disease:136 - Prediction failed: Numpy is not available
+2026-01-20 00:49:09,516 - main - ERROR - predict_disease:136 - Prediction failed: Numpy is not available
+2026-01-20 00:49:58,595 - main - ERROR - predict_disease:136 - Prediction failed: Numpy is not available
+2026-01-20 00:50:39,636 - main - ERROR - predict_disease:136 - Prediction failed: Numpy is not available
+2026-01-20 00:52:38,208 - main - ERROR - predict_disease:136 - Prediction failed: Numpy is not available
+2026-01-20 00:53:11,076 - main - ERROR - predict_disease:136 - Prediction failed: Numpy is not available
+2026-01-20 00:58:11,002 - main - ERROR - predict_disease:136 - Prediction failed: Numpy is not available
+2026-01-20 00:59:05,002 - main - ERROR - predict_disease:136 - Prediction failed: Numpy is not available
+2026-01-20 09:22:54,215 - main - ERROR - predict_disease:136 - Prediction failed: cannot access local variable 'time' where it is not associated with a value
+2026-01-20 09:28:01,235 - main - ERROR - predict_disease:136 - Prediction failed: cannot access local variable 'time' where it is not associated with a value
+2026-01-20 09:32:03,564 - main - ERROR - predict_disease:136 - Prediction failed: cannot access local variable 'time' where it is not associated with a value
+2026-01-20 09:35:40,381 - main - ERROR - predict_disease:136 - Prediction failed: cannot access local variable 'time' where it is not associated with a value
+2026-01-20 09:36:41,743 - main - ERROR - predict_disease:136 - Prediction failed: cannot access local variable 'time' where it is not associated with a value
+2026-01-20 09:37:28,518 - main - ERROR - predict_disease:136 - Prediction failed: cannot access local variable 'time' where it is not associated with a value
+2026-01-20 09:43:10,726 - main - ERROR - predict_disease:136 - Prediction failed: cannot access local variable 'time' where it is not associated with a value
+2026-01-20 09:45:15,794 - main - ERROR - predict_disease:136 - Prediction failed: cannot access local variable 'time' where it is not associated with a value
+2026-01-20 09:45:26,730 - main - ERROR - predict_disease:136 - Prediction failed: cannot access local variable 'time' where it is not associated with a value
+2026-01-20 09:46:35,784 - main - ERROR - predict_disease:136 - Prediction failed: cannot access local variable 'time' where it is not associated with a value
+2026-01-20 09:47:20,674 - main - ERROR - predict_disease:136 - Prediction failed: cannot access local variable 'time' where it is not associated with a value
+2026-01-20 09:52:25,525 - main - ERROR - predict_disease:136 - Prediction failed: cannot access local variable 'time' where it is not associated with a value

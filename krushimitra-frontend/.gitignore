@@ -1,0 +1,97 @@
+# dependencies
+node_modules/
+
+# expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+dist-web/
+
+# native
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# metro
+.metro-health-check*
+
+# debug
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# macos
+.DS_Store
+*.pem
+
+# local env files
+.env*.local
+.env
+
+# typescript
+*.tsbuildinfo
+
+# Backend - deployed separately
+backend/
+python-services/
+
+# Python files and environments
+*.py
+.venv/
+venv/
+*/.venv/
+/.venv310/
+__pycache__/
+*.py[cod]
+*.pyo
+requirements.txt
+
+# Large model files
+*.gguf
+*.pt
+*.wav
+*.mp3
+yolo*.pt
+yolov8*.pt
+yolo11*.pt
+mistral*.gguf
+
+# Dataset files
+datasets/
+runs/
+ultralytics/
+hyp/
+
+# Large directories
+indic-tts/
+krushimitra-mistral-7b/
+ngrok/
+
+# Docker files
+Dockerfile.*
+docker-compose.yml
+
+# Cloudflare
+cloudflared.exe
+*.bat
+
+# Test files
+test-*.html
+test_*.py
+testing_*.py
+*_test.py
+
+# Documentation - not needed for deployment
+*.md
+!README.md
+
+# Build artifacts
+.cache/
+expo-error.log
+
+# Web subdirectory (if separate)
+web/

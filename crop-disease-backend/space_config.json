@@ -1,0 +1,10 @@
+{
+  "title": "Crop Disease Detection API",
+  "sdk": "docker",
+  "app_port": 8000,
+  "license": "mit",
+  "tags": ["computer-vision", "agriculture", "ai", "plant-disease"],
+  "models": [],
+  "datasets": [],
+  "spaces": []
+}

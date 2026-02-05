@@ -1,0 +1,78 @@
+2026-01-20 00:32:19,822 - main - INFO - startup_event:61 - Starting crop disease detection service...
+2026-01-20 00:32:20,852 - main - INFO - startup_event:68 - System info: {'cpu_percent': 5.1, 'memory_percent': 69.7, 'memory_available_gb': 4.76, 'platform': 'Windows-11-10.0.26100-SP0', 'python_version': '3.12.10'}
+2026-01-20 00:32:30,493 - main - INFO - startup_event:80 - Crop disease detection service initialized successfully!
+2026-01-20 00:36:19,045 - main - ERROR - predict_disease:136 - Prediction failed: Numpy is not available
+2026-01-20 00:37:11,859 - main - INFO - startup_event:61 - Starting crop disease detection service...
+2026-01-20 00:37:12,894 - main - INFO - startup_event:68 - System info: {'cpu_percent': 5.8, 'memory_percent': 76.0, 'memory_available_gb': 3.78, 'platform': 'Windows-11-10.0.26100-SP0', 'python_version': '3.12.10'}
+2026-01-20 00:37:13,819 - main - INFO - startup_event:80 - Crop disease detection service initialized successfully!
+2026-01-20 00:45:40,615 - main - ERROR - predict_disease:136 - Prediction failed: Numpy is not available
+2026-01-20 00:46:46,282 - main - INFO - startup_event:61 - Starting crop disease detection service...
+2026-01-20 00:46:47,310 - main - INFO - startup_event:68 - System info: {'cpu_percent': 7.2, 'memory_percent': 72.8, 'memory_available_gb': 4.26, 'platform': 'Windows-11-10.0.26100-SP0', 'python_version': '3.12.10'}
+2026-01-20 00:46:47,978 - main - INFO - startup_event:80 - Crop disease detection service initialized successfully!
+2026-01-20 00:48:34,031 - main - ERROR - predict_disease:136 - Prediction failed: Numpy is not available
+2026-01-20 00:49:09,516 - main - ERROR - predict_disease:136 - Prediction failed: Numpy is not available
+2026-01-20 00:49:58,595 - main - ERROR - predict_disease:136 - Prediction failed: Numpy is not available
+2026-01-20 00:50:39,636 - main - ERROR - predict_disease:136 - Prediction failed: Numpy is not available
+2026-01-20 00:52:38,208 - main - ERROR - predict_disease:136 - Prediction failed: Numpy is not available
+2026-01-20 00:53:11,076 - main - ERROR - predict_disease:136 - Prediction failed: Numpy is not available
+2026-01-20 00:58:11,002 - main - ERROR - predict_disease:136 - Prediction failed: Numpy is not available
+2026-01-20 00:59:05,002 - main - ERROR - predict_disease:136 - Prediction failed: Numpy is not available
+2026-01-20 09:17:51,017 - main - INFO - startup_event:61 - Starting crop disease detection service...
+2026-01-20 09:17:52,051 - main - INFO - startup_event:68 - System info: {'cpu_percent': 16.7, 'memory_percent': 86.8, 'memory_available_gb': 2.08, 'platform': 'Windows-11-10.0.26100-SP0', 'python_version': '3.12.10'}
+2026-01-20 09:17:52,051 - main - INFO - startup_event:80 - Crop disease detection service initialized successfully!
+2026-01-20 09:22:10,889 - main - INFO - startup_event:61 - Starting crop disease detection service...
+2026-01-20 09:22:11,929 - main - INFO - startup_event:68 - System info: {'cpu_percent': 17.7, 'memory_percent': 88.7, 'memory_available_gb': 1.77, 'platform': 'Windows-11-10.0.26100-SP0', 'python_version': '3.12.10'}
+2026-01-20 09:22:11,929 - main - INFO - startup_event:80 - Crop disease detection service initialized successfully!
+2026-01-20 09:22:33,914 - main - INFO - startup_event:61 - Starting crop disease detection service...
+2026-01-20 09:22:34,956 - main - INFO - startup_event:68 - System info: {'cpu_percent': 28.1, 'memory_percent': 85.6, 'memory_available_gb': 2.26, 'platform': 'Windows-11-10.0.26100-SP0', 'python_version': '3.12.10'}
+2026-01-20 09:22:34,957 - main - INFO - startup_event:80 - Crop disease detection service initialized successfully!
+2026-01-20 09:22:54,215 - main - ERROR - predict_disease:136 - Prediction failed: cannot access local variable 'time' where it is not associated with a value
+2026-01-20 09:28:01,235 - main - ERROR - predict_disease:136 - Prediction failed: cannot access local variable 'time' where it is not associated with a value
+2026-01-20 09:32:03,564 - main - ERROR - predict_disease:136 - Prediction failed: cannot access local variable 'time' where it is not associated with a value
+2026-01-20 09:35:40,381 - main - ERROR - predict_disease:136 - Prediction failed: cannot access local variable 'time' where it is not associated with a value
+2026-01-20 09:36:41,743 - main - ERROR - predict_disease:136 - Prediction failed: cannot access local variable 'time' where it is not associated with a value
+2026-01-20 09:37:28,518 - main - ERROR - predict_disease:136 - Prediction failed: cannot access local variable 'time' where it is not associated with a value
+2026-01-20 09:43:10,726 - main - ERROR - predict_disease:136 - Prediction failed: cannot access local variable 'time' where it is not associated with a value
+2026-01-20 09:45:02,424 - main - INFO - startup_event:61 - Starting crop disease detection service...
+2026-01-20 09:45:03,472 - main - INFO - startup_event:68 - System info: {'cpu_percent': 17.6, 'memory_percent': 86.0, 'memory_available_gb': 2.19, 'platform': 'Windows-11-10.0.26100-SP0', 'python_version': '3.12.10'}
+2026-01-20 09:45:03,473 - main - INFO - startup_event:80 - Crop disease detection service initialized successfully!
+2026-01-20 09:45:09,947 - main - INFO - startup_event:61 - Starting crop disease detection service...
+2026-01-20 09:45:10,993 - main - INFO - startup_event:68 - System info: {'cpu_percent': 9.8, 'memory_percent': 86.1, 'memory_available_gb': 2.18, 'platform': 'Windows-11-10.0.26100-SP0', 'python_version': '3.12.10'}
+2026-01-20 09:45:10,993 - main - INFO - startup_event:80 - Crop disease detection service initialized successfully!
+2026-01-20 09:45:15,794 - main - ERROR - predict_disease:136 - Prediction failed: cannot access local variable 'time' where it is not associated with a value
+2026-01-20 09:45:26,730 - main - ERROR - predict_disease:136 - Prediction failed: cannot access local variable 'time' where it is not associated with a value
+2026-01-20 09:46:35,784 - main - ERROR - predict_disease:136 - Prediction failed: cannot access local variable 'time' where it is not associated with a value
+2026-01-20 09:46:53,452 - main - INFO - startup_event:61 - Starting crop disease detection service...
+2026-01-20 09:46:54,485 - main - INFO - startup_event:68 - System info: {'cpu_percent': 14.3, 'memory_percent': 86.9, 'memory_available_gb': 2.06, 'platform': 'Windows-11-10.0.26100-SP0', 'python_version': '3.12.10'}
+2026-01-20 09:46:54,486 - main - INFO - startup_event:80 - Crop disease detection service initialized successfully!
+2026-01-20 09:46:59,354 - main - INFO - startup_event:61 - Starting crop disease detection service...
+2026-01-20 09:47:00,394 - main - INFO - startup_event:68 - System info: {'cpu_percent': 5.4, 'memory_percent': 85.6, 'memory_available_gb': 2.26, 'platform': 'Windows-11-10.0.26100-SP0', 'python_version': '3.12.10'}
+2026-01-20 09:47:00,394 - main - INFO - startup_event:80 - Crop disease detection service initialized successfully!
+2026-01-20 09:47:20,674 - main - ERROR - predict_disease:136 - Prediction failed: cannot access local variable 'time' where it is not associated with a value
+2026-01-20 09:52:25,525 - main - ERROR - predict_disease:136 - Prediction failed: cannot access local variable 'time' where it is not associated with a value
+2026-01-20 09:52:41,773 - main - INFO - startup_event:61 - Starting crop disease detection service...
+2026-01-20 09:52:42,825 - main - INFO - startup_event:68 - System info: {'cpu_percent': 5.2, 'memory_percent': 83.4, 'memory_available_gb': 2.61, 'platform': 'Windows-11-10.0.26100-SP0', 'python_version': '3.12.10'}
+2026-01-20 09:52:42,827 - main - INFO - startup_event:80 - Crop disease detection service initialized successfully!
+2026-01-20 09:53:01,028 - main - INFO - predict_disease:129 - Disease detected: Tomato Healthy (confidence: 0.9)
+2026-01-20 09:53:10,312 - main - INFO - predict_disease:129 - Disease detected: Tomato Late Blight (confidence: 0.8)
+2026-01-20 09:54:04,722 - main - INFO - predict_disease:129 - Disease detected: Potato Early Blight (confidence: 0.86)
+2026-01-20 09:56:02,282 - main - INFO - predict_disease:129 - Disease detected: Potato Early Blight (confidence: 0.83)
+2026-01-20 09:57:56,960 - main - INFO - predict_disease:129 - Disease detected: Tomato Late Blight (confidence: 0.77)
+2026-01-20 10:00:11,919 - main - INFO - predict_disease:129 - Disease detected: Potato Early Blight (confidence: 0.84)
+2026-01-20 10:01:10,717 - main - INFO - predict_disease:129 - Disease detected: Tomato Healthy (confidence: 0.94)
+2026-01-20 10:02:09,173 - main - INFO - predict_disease:129 - Disease detected: Potato Early Blight (confidence: 0.85)
+2026-01-20 10:03:31,911 - main - INFO - predict_disease:129 - Disease detected: Tomato Late Blight (confidence: 0.79)
+2026-01-20 10:04:46,165 - main - INFO - predict_disease:129 - Disease detected: Tomato Early Blight (confidence: 0.87)
+2026-01-20 10:15:38,878 - main - INFO - startup_event:61 - Starting crop disease detection service...
+2026-01-20 10:15:39,927 - main - INFO - startup_event:68 - System info: {'cpu_percent': 18.6, 'memory_percent': 90.9, 'memory_available_gb': 1.43, 'platform': 'Windows-11-10.0.26100-SP0', 'python_version': '3.12.10'}
+2026-01-20 10:15:44,409 - main - INFO - startup_event:80 - Crop disease detection service initialized successfully!
+2026-01-20 10:17:10,837 - main - INFO - predict_disease:129 - Disease detected: Potato Early Blight (confidence: 0.81)
+2026-01-20 10:19:18,390 - main - INFO - startup_event:61 - Starting crop disease detection service...
+2026-01-20 10:19:19,429 - main - INFO - startup_event:68 - System info: {'cpu_percent': 16.0, 'memory_percent': 89.9, 'memory_available_gb': 1.59, 'platform': 'Windows-11-10.0.26100-SP0', 'python_version': '3.12.10'}
+2026-01-20 10:19:20,896 - main - INFO - startup_event:80 - Crop disease detection service initialized successfully!
+2026-01-20 10:19:26,551 - main - INFO - predict_disease:129 - Disease detected: Tomato Early Blight (confidence: 0.89)
+2026-01-20 10:22:01,734 - main - INFO - startup_event:61 - Starting crop disease detection service...
+2026-01-20 10:22:02,775 - main - INFO - startup_event:68 - System info: {'cpu_percent': 21.1, 'memory_percent': 87.9, 'memory_available_gb': 1.91, 'platform': 'Windows-11-10.0.26100-SP0', 'python_version': '3.12.10'}
+2026-01-20 10:22:03,974 - main - INFO - startup_event:80 - Crop disease detection service initialized successfully!
+2026-01-20 10:22:13,366 - main - INFO - predict_disease:129 - Disease detected: Tomato Early Blight (confidence: 0.86)
+2026-01-20 10:23:05,382 - main - INFO - predict_disease:129 - Disease detected: Tomato Late Blight (confidence: 0.77)

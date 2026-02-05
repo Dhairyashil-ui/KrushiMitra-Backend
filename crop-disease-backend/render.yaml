@@ -1,0 +1,21 @@
+# Render.com Deployment Configuration
+version: 1
+
+services:
+  - type: web
+    name: crop-disease-api
+    env: python
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python main.py"
+    envVars:
+      - key: PORT
+        value: 8000
+      - key: TF_NUM_INTEROP_THREADS
+        value: 2
+      - key: TF_NUM_INTRAOP_THREADS
+        value: 2
+      - key: TORCH_NUM_THREADS
+        value: 2
+    autoDeploy: true
+    healthCheckPath: /health
+    numInstances: 1
