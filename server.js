@@ -19,6 +19,13 @@ const { generateSpeech } = require('./tts');
 const sgMail = require('@sendgrid/mail');
 const { ObjectId } = require('mongodb');
 const { OAuth2Client } = require('google-auth-library'); // Google OAuth verification
+const Groq = require('groq-sdk');
+const multer = require('multer');
+const { identifyPlant } = require('./plantnet_client');
+const { spawn } = require('child_process');
+
+
+
 
 const {
   initUserContextCollection,
@@ -34,6 +41,11 @@ const googleClient = new OAuth2Client(
   process.env.GOOGLE_CLIENT_SECRET,
   `${process.env.FRONTEND_URL || 'http://localhost:3000'}` // Default Redirect URI
 );
+
+// Initialize Groq AI Client
+const groq = new Groq({
+  apiKey: process.env.GROQ_API_KEY
+});
 
 
 
@@ -1454,7 +1466,158 @@ app.post('/auth/verify', async (req, res) => {
   }
 });
 
+/* ==========================================================================
+   CROP DISEASE PREDICTION FLOW
+   ========================================================================== */
+
+// Configure Multer for temporary file uploads
+const upload = multer({ dest: 'uploads/' });
+
+// POST /predict - Analyze plant image (Phase 1: Plant Check, Phase 2: ID, Phase 3: Disease)
+app.post('/predict', upload.single('file'), async (req, res) => {
+  const file = req.file;
+  if (!file) {
+    return res.status(400).json({ success: false, message: 'No file uploaded' });
+  }
+
+  const filePath = file.path;
+
+  try {
+    console.log(`📸 File uploaded: ${filePath} (${file.size} bytes)`);
+
+    // ---------- PHASE 1: Plant check (Mock) ----------
+    // TODO: Implement actual plant classification model
+    const plantCheck = { is_plant: true, confidence: 0.99 };
+
+    if (!plantCheck.is_plant) {
+      // Cleanup file
+      fs.unlinkSync(filePath);
+      return res.json({
+        success: false,
+        message: "Uploaded image is not a plant",
+        details: plantCheck
+      });
+    }
+
+    // ---------- PHASE 2: REAL Plant Identification (PlantNet) ----------
+    // Detect organ from request body or default to 'leaf'
+    const organ = req.body.organ || 'leaf';
+    const plantIdentity = await identifyPlant(filePath, organ);
+
+    // ---------- PHASE 4 & 5: AI Disease Analysis (YOLOv8 + MobileNet via Python) ----------
+    console.log('🔬 Starting AI Disease Analysis...');
+
+    // Spawn Python process
+    const pythonProcess = spawn('python', ['scripts/crop_inference.py', filePath]);
+
+    let pythonData = '';
+    let pythonError = '';
+
+    const diseaseResult = await new Promise((resolve, reject) => {
+      pythonProcess.stdout.on('data', (data) => {
+        pythonData += data.toString();
+      });
+
+      pythonProcess.stderr.on('data', (data) => {
+        pythonError += data.toString();
+      });
+
+      pythonProcess.on('close', (code) => {
+        if (code !== 0) {
+          console.error(`Python script exited with code ${code}`);
+          console.error(`Python Error: ${pythonError}`);
+          // Fallback to Healthy if script fails
+          resolve({
+            success: false,
+            disease: "Unknown (Analysis Failed)",
+            confidence: 0,
+            details: "AI Model could not process image."
+          });
+        } else {
+          try {
+            const result = JSON.parse(pythonData);
+            const analysis = result.disease_analysis;
+            resolve({
+              success: true,
+              disease: analysis.disease,
+              confidence: analysis.confidence,
+              details: `Detected via ${analysis.model}. Leaf detected: ${result.leaf_detection.detected}`
+            });
+          } catch (e) {
+            console.error('Failed to parse Python output:', pythonData);
+            resolve({
+              success: false,
+              disease: "Parse Error",
+              confidence: 0
+            });
+          }
+        }
+      });
+    });
+
+    // ---------- PHASE 6: INTELLECTUAL AI SOLUTION (Groq / Llama 3) ----------
+    let aiSolution = {
+      treatment: "No treatment required for healthy plants.",
+      prevention: ["Maintain good soil health", "Water regularly"],
+      tips: ["Monitor for pests"]
+    };
+
+    if (diseaseResult.disease && diseaseResult.disease !== 'Healthy') {
+      try {
+        console.log('🧠 Generating AI Solution for:', diseaseResult.disease);
+        const prompt = `
+            Act as an agricultural expert. A farmer has detected "${diseaseResult.disease}" on their "${plantIdentity.plant_common || 'crop'}".
+            
+            Provide a strict JSON response with no markdown formatted as:
+            {
+                "treatment": "Brief step-by-step treatment plan (max 2 sentences)",
+                "prevention": ["List of 3 short prevention tips"],
+                "tips": ["List of 2 general maintainance tips"]
+            }
+            `;
+
+        const completion = await groq.chat.completions.create({
+          messages: [{ role: "user", content: prompt }],
+          model: "llama-3.1-8b-instant",
+          temperature: 0.3,
+          response_format: { type: "json_object" }
+        });
+
+        const content = completion.choices[0]?.message?.content;
+        if (content) {
+          aiSolution = JSON.parse(content);
+        }
+      } catch (groqError) {
+        console.error('Groq AI Error:', groqError);
+        // Non-blocking error, stick to defaults
+      }
+    }
+
+    // Cleanup file
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+
+    res.json({
+      success: true,
+      plant_identification: plantIdentity,
+      disease_detection: diseaseResult,
+      ai_solution: aiSolution
+    });
+
+  } catch (error) {
+    console.error('Error in /predict:', error);
+    // Attempt cleanup
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+
+    res.status(500).json({
+      success: false,
+      message: 'Analysis failed',
+      error: error.message
+    });
+  }
+});
+
 // 3. Activity Tracking
+
 // ... (existing activity routes) ...
 
 /* ==========================================================================
@@ -1993,18 +2156,38 @@ app.post('/ai/chat', authenticate, async (req, res) => {
       prompt: JSON.stringify(llmPrompt, null, 2)
     });
 
-    // TODO: Replace this mock response with actual LLM API call
-    // Example: const aiResponse = await callLLM(llmPrompt);
-    // For now, we'll simulate a farmer-friendly response
-    let aiResponse = `Based on your query "${query}", I recommend checking the latest mandi prices for your crops and considering weather conditions in your area.`;
+    // Call Groq API for Llama 3.1 response
+    let aiResponse;
+    try {
+      const chatCompletion = await groq.chat.completions.create({
+        messages: [
+          {
+            role: "system",
+            content: `You are KrushiMitra Orb, a helpful agricultural AI assistant for Indian farmers.
+                              User Context: ${JSON.stringify(llmPrompt.user_data)}
+                              User Profile: ${JSON.stringify(llmPrompt.farmer_profile)}
+                              Provide helpful, practical agricultural advice. Keep responses concise and friendly.
+                              If language is not English, respond in the requested language (${resolvedLanguage}).`
+          },
+          ...llmPrompt.last_5_conversations,
+          {
+            role: "user",
+            content: llmPrompt.query
+          }
+        ],
+        model: "llama-3.1-8b-instant",
+        temperature: 0.7,
+        max_tokens: 1024,
+        top_p: 1,
+        stream: false,
+        stop: null
+      });
 
-    // For demonstration, we'll customize the response based on language
-    if (resolvedLanguage === 'hi') {
-      aiResponse = `आपके प्रश्न "${query}" के आधार पर, मैं अनुशंसा करता हूं कि आप अपनी फसलों के नवीनतम मंडी भाव देखें और अपने क्षेत्र में मौसम की स्थिति पर विचार करें।`;
-    } else if (resolvedLanguage === 'ml') {
-      aiResponse = `നിങ്ങളുടെ "${query}" എന്ന ചോദ്യത്തിന്റെ അടിസ്ഥാനത്തിൽ, നിങ്ങളുടെ വിളകൾക്കായുള്ള ഏറ്റവും പുതിയ മണ്ടി വിലകൾ പരിശോധിക്കാനും നിങ്ങളുടെ പ്രദേശത്തെ കാലാവസ്ഥാ സ്ഥിതിഗതികൾ പരിഗണിക്കാനും ഞാൻ ശുപാർശ ചെയ്യുന്നു.`;
-    } else if (resolvedLanguage === 'mr') {
-      aiResponse = `तुमच्या "${query}" प्रश्नाच्या आधारावर, मी तुम्हाला तुमच्या पीकांसाठी नवीनतम मंडी भाव तपासण्याची आणि तुमच्या क्षेत्रातील हवामानाच्या परिस्थितीचा विचार करण्याची शिफारस करतो.`;
+      aiResponse = chatCompletion.choices[0]?.message?.content || "I'm sorry, I couldn't generate a response at this time.";
+    } catch (groqError) {
+      logger.error('Groq API Error', { error: groqError.message });
+      // Fallback or error message
+      aiResponse = "I am currently experiencing high traffic. Please try again later. (AI Error)";
     }
 
     // Mock automations
