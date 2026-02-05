@@ -43,9 +43,20 @@ const googleClient = new OAuth2Client(
 );
 
 // Initialize Groq AI Client
-const groq = new Groq({
-  apiKey: process.env.GROQ_API_KEY
-});
+// Initialize Groq AI Client (Conditional)
+let groq = null;
+if (process.env.GROQ_API_KEY) {
+  try {
+    groq = new Groq({
+      apiKey: process.env.GROQ_API_KEY
+    });
+    console.log("✅ Groq AI Client initialized");
+  } catch (err) {
+    console.error("⚠️ Failed to initialize Groq:", err.message);
+  }
+} else {
+  console.warn("⚠️ GROQ_API_KEY is missing. AI treatment recommendations will be disabled.");
+}
 
 
 
