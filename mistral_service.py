@@ -11,8 +11,8 @@ def get_groq_response(prompt, action='chat'):
     if not api_key:
         return {"response": "Groq API key not configured. Please set GROQ_API_KEY environment variable."}
     
-    # Use a supported model (llama3-70b-8192 instead of deprecated llama3-8b-8192)
-    model = 'llama3-70b-8192'
+    # Use the latest supported model
+    model = 'llama-3.1-8b-instant'
     
     # Create appropriate prompt based on action
     if action == 'advice':
