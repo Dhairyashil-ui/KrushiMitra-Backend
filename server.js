@@ -1574,33 +1574,38 @@ app.post('/predict', upload.single('file'), async (req, res) => {
     };
 
     if (diseaseResult.disease && diseaseResult.disease !== 'Healthy') {
-      try {
-        console.log('🧠 Generating AI Solution for:', diseaseResult.disease);
-        const prompt = `
-            Act as an agricultural expert. A farmer has detected "${diseaseResult.disease}" on their "${plantIdentity.plant_common || 'crop'}".
-            
-            Provide a strict JSON response with no markdown formatted as:
-            {
-                "treatment": "Brief step-by-step treatment plan (max 2 sentences)",
-                "prevention": ["List of 3 short prevention tips"],
-                "tips": ["List of 2 general maintainance tips"]
-            }
-            `;
+      if (!groq) {
+        console.log('⚠️ Skipping AI Solution: GROQ_API_KEY not configured.');
+        aiSolution.treatment = "AI Recommendations unavailable (Server Config Error).";
+      } else {
+        try {
+          console.log('🧠 Generating AI Solution for:', diseaseResult.disease);
+          const prompt = `
+                Act as an agricultural expert. A farmer has detected "${diseaseResult.disease}" on their "${plantIdentity.plant_common || 'crop'}".
+                
+                Provide a strict JSON response with no markdown formatted as:
+                {
+                    "treatment": "Brief step-by-step treatment plan (max 2 sentences)",
+                    "prevention": ["List of 3 short prevention tips"],
+                    "tips": ["List of 2 general maintainance tips"]
+                }
+                `;
 
-        const completion = await groq.chat.completions.create({
-          messages: [{ role: "user", content: prompt }],
-          model: "llama-3.1-8b-instant",
-          temperature: 0.3,
-          response_format: { type: "json_object" }
-        });
+          const completion = await groq.chat.completions.create({
+            messages: [{ role: "user", content: prompt }],
+            model: "llama-3.1-8b-instant",
+            temperature: 0.3,
+            response_format: { type: "json_object" }
+          });
 
-        const content = completion.choices[0]?.message?.content;
-        if (content) {
-          aiSolution = JSON.parse(content);
+          const content = completion.choices[0]?.message?.content;
+          if (content) {
+            aiSolution = JSON.parse(content);
+          }
+        } catch (groqError) {
+          console.error('Groq AI Error:', groqError);
+          // Non-blocking error, stick to defaults
         }
-      } catch (groqError) {
-        console.error('Groq AI Error:', groqError);
-        // Non-blocking error, stick to defaults
       }
     }
 
