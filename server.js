@@ -31,7 +31,8 @@ const {
 // Initialize Google OAuth client
 const googleClient = new OAuth2Client(
   process.env.GOOGLE_CLIENT_ID,
-  process.env.GOOGLE_CLIENT_SECRET
+  process.env.GOOGLE_CLIENT_SECRET,
+  `${process.env.FRONTEND_URL || 'http://localhost:3000'}` // Redirect URI
 );
 
 // Ensure the working directory is the backend folder even if started from project root
@@ -697,7 +698,9 @@ app.post('/auth/google', async (req, res) => {
         // We MUST pass the same redirect_uri that was used on the frontend
         const { tokens } = await googleClient.getToken({
           code,
-          redirect_uri // Pass the redirect_uri received from frontend
+          redirect_uri,
+          client_id: process.env.GOOGLE_CLIENT_ID,
+          client_secret: process.env.GOOGLE_CLIENT_SECRET
         });
 
         // Determine the ID Token from the response
