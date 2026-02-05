@@ -54,6 +54,8 @@ interface DiseaseDetection {
   disease: string;
   confidence: number;
   details: string;
+  severity?: string;
+  advice?: string;
 }
 
 interface AISolution {
@@ -68,6 +70,7 @@ interface AnalysisResult {
   disease_detection: DiseaseDetection;
   ai_solution?: AISolution;
   message?: string;
+  crop?: string;
 }
 
 export default function CropDiseaseDetectionScreen() {
@@ -281,7 +284,21 @@ export default function CropDiseaseDetectionScreen() {
           {analysisResult && (
             <Animated.View style={[styles.resultsContainer, { opacity: fadeAnimation }]}>
 
-              {/* STEP 3 & 6: Plant Identification Result */}
+              {/* Crop Information */}
+              {analysisResult.crop && (
+                <View style={styles.resultCard}>
+                  <View style={styles.sectionHeader}>
+                    <Leaf size={20} color="#4CAF50" />
+                    <Text style={styles.sectionTitle}>Crop Information</Text>
+                  </View>
+                  <View style={styles.resultRow}>
+                    <Text style={styles.label}>Detected Crop:</Text>
+                    <Text style={styles.value}>{analysisResult.crop}</Text>
+                  </View>
+                </View>
+              )}
+
+              {/* Plant Identification Result */}
               <View style={styles.resultCard}>
                 <View style={styles.sectionHeader}>
                   <Leaf size={20} color="#4CAF50" />
@@ -307,7 +324,7 @@ export default function CropDiseaseDetectionScreen() {
                 </View>
               </View>
 
-              {/* STEP 5 & 6: Disease Analysis Result */}
+              {/* Disease Analysis Result */}
               <View style={styles.resultCard}>
                 <View style={styles.sectionHeader}>
                   <Bug size={20} color={analysisResult.disease_detection.disease === 'Healthy' ? '#4CAF50' : '#EF4444'} />
@@ -326,12 +343,27 @@ export default function CropDiseaseDetectionScreen() {
                     {analysisResult.disease_detection.disease}
                   </Text>
                 </View>
+                
+                {analysisResult.disease_detection.severity && (
+                  <View style={styles.resultRow}>
+                    <Text style={styles.label}>Severity:</Text>
+                    <Text style={[styles.value, 
+                      analysisResult.disease_detection.severity === 'High' ? { color: '#EF4444' } :
+                      analysisResult.disease_detection.severity === 'Medium' ? { color: '#F59E0B' } :
+                      { color: '#4CAF50' }
+                    ]}>
+                      {analysisResult.disease_detection.severity}
+                    </Text>
+                  </View>
+                )}
+                
                 <View style={styles.resultRow}>
                   <Text style={styles.label}>Confidence:</Text>
                   <Text style={[styles.value, { color: getConfidenceColor(analysisResult.disease_detection.confidence) }]}>
                     {(analysisResult.disease_detection.confidence * 100).toFixed(1)}%
                   </Text>
                 </View>
+                
                 {analysisResult.disease_detection.details && (
                   <Text style={styles.detailsText}>{analysisResult.disease_detection.details}</Text>
                 )}
@@ -344,8 +376,13 @@ export default function CropDiseaseDetectionScreen() {
                     <Shield size={20} color="#F59E0B" />
                     <Text style={styles.sectionTitle}>Recommendations</Text>
                   </View>
-                  {/* Display AI solution if available */}
-                  {analysisResult.ai_solution ? (
+                  
+                  {/* Display AI advice if available */}
+                  {analysisResult.disease_detection.advice ? (
+                    <Text style={styles.recommendationText}>
+                      {analysisResult.disease_detection.advice}
+                    </Text>
+                  ) : analysisResult.ai_solution ? (
                     <>
                       <Text style={styles.recommendationText}>
                         {analysisResult.ai_solution.treatment}
